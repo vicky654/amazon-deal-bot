@@ -1,338 +1,265 @@
-
-
 'use client';
 
-import { useState } from "react";
-import axios from "axios";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import axios from 'axios';
 
-const API_URL = "http://localhost:5000";
+import Sidebar from '../components/Sidebar';
+import Navbar from '../components/Navbar';
+import DealGeneratorForm from '../components/DealGeneratorForm';
+import DealPreviewCard from '../components/DealPreviewCard';
+import LoadingSkeleton from '../components/LoadingSkeleton';
+import RecentDealsTable from '../components/RecentDealsTable';
+import CustomMessagePanel from '../components/CustomMessagePanel';
+import Toast from '../components/Toast';
 
-export default function Home() {
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-  const [url, setUrl] = useState("");
-  const [message, setMessage] = useState("");
+export default function Dashboard() {
+  // ── Navigation ──────────────────────────────────────────────────────────────
+  const [activeSection, setActiveSection] = useState('generate');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // ── Deal generation ──────────────────────────────────────────────────────────
   const [deal, setDeal] = useState(null);
+  const [generating, setGenerating] = useState(false);
 
-  const [loading, setLoading] = useState(false);
+  // ── Recent deals ─────────────────────────────────────────────────────────────
+  const [recentDeals, setRecentDeals] = useState([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+
+  // ── Telegram ─────────────────────────────────────────────────────────────────
   const [telegramLoading, setTelegramLoading] = useState(false);
+  const [messageLoading, setMessageLoading] = useState(false);
 
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  // ── Toast ────────────────────────────────────────────────────────────────────
+  const [toast, setToast] = useState(null);
+  const toastId = useRef(0);
 
-  /*
-  GENERATE DEAL
-  */
+  function showToast(type, message) {
+    toastId.current += 1;
+    setToast({ type, message, id: toastId.current });
+  }
 
-  const generateDeal = async () => {
-
-    if (!url.trim()) {
-      setError("Please enter Amazon URL");
-      return;
+  // ── Fetch recent deals ───────────────────────────────────────────────────────
+  const fetchRecentDeals = useCallback(async () => {
+    setRecentLoading(true);
+    try {
+      const { data } = await axios.get(`${API_URL}/api/deals`);
+      setRecentDeals(data);
+    } catch {
+      showToast('error', 'Could not load recent deals — is the backend running?');
+    } finally {
+      setRecentLoading(false);
     }
+  }, []);
 
-    setLoading(true);
-    setError("");
-    setSuccess("");
+  // Auto-fetch on mount and when switching to the recent section
+  useEffect(() => {
+    fetchRecentDeals();
+  }, [fetchRecentDeals]);
+
+  useEffect(() => {
+    if (activeSection === 'recent') fetchRecentDeals();
+  }, [activeSection, fetchRecentDeals]);
+
+  // ── Generate deal ─────────────────────────────────────────────────────────────
+  async function handleGenerate(url) {
+    setGenerating(true);
     setDeal(null);
-
     try {
-
-      const res = await axios.post(`${API_URL}/generate`, {
-        url: url.trim()
-      });
-
-
-      console.log("API response:", res.data);
-
-      setDeal(res.data);
-
+      const { data } = await axios.post(`${API_URL}/generate`, { url });
+      setDeal(data);
+      showToast('success', 'Deal scraped successfully!');
+      // Refresh recent deals in background
+      fetchRecentDeals();
     } catch (err) {
-
-      setError(err.response?.data?.error || "Failed to generate deal");
-
+      const msg = err.response?.data?.error || 'Failed to generate deal. Check the URL and try again.';
+      showToast('error', msg);
     } finally {
-
-      setLoading(false);
-
+      setGenerating(false);
     }
+  }
 
-  };
-
-  /*
-  SEND DEAL TO TELEGRAM
-  */
-
-  const sendDealTelegram = async () => {
-
+  // ── Post deal to Telegram ─────────────────────────────────────────────────────
+  async function handlePostTelegram() {
     if (!deal) return;
-
     setTelegramLoading(true);
-
     try {
-
-await axios.post(`${API_URL}/telegram`, {
-  title: deal.title,
-  price: deal.price,
-  image: deal.image,
-  link: deal.link,
-  originalPrice: deal.originalPrice,
-  savings: deal.savings
-});
-
-      setSuccess("✅ Deal posted to Telegram!");
-
-    } catch (err) {
-
-      setError(err.response?.data?.error || "Telegram failed");
-
-    } finally {
-
-      setTelegramLoading(false);
-
-    }
-
-  };
-
-  /*
-  SEND CUSTOM MESSAGE
-  */
-
-  const sendMessageTelegram = async () => {
-
-    if (!message.trim()) {
-      setError("Enter message first");
-      return;
-    }
-
-    setTelegramLoading(true);
-    setError("");
-    setSuccess("");
-
-    try {
-
-      await axios.post(`${API_URL}/telegram-message`, {
-        message: message
+      await axios.post(`${API_URL}/telegram`, {
+        title: deal.title,
+        price: deal.price,
+        image: deal.image,
+        link: deal.link,
+        originalPrice: deal.originalPrice,
+        savings: deal.savings,
       });
-
-      setSuccess("✅ Message sent to Telegram!");
-
-      setMessage("");
-
+      showToast('success', 'Deal posted to Telegram channel!');
     } catch (err) {
-
-      setError(err.response?.data?.error || "Message send failed");
-
+      const msg = err.response?.data?.error || 'Telegram post failed. Check your bot config.';
+      showToast('error', msg);
     } finally {
-
       setTelegramLoading(false);
-
     }
+  }
 
-  };
+  // ── Send custom message ───────────────────────────────────────────────────────
+  async function handleSendMessage(message) {
+    setMessageLoading(true);
+    try {
+      await axios.post(`${API_URL}/telegram-message`, { message });
+      showToast('success', 'Message sent to Telegram!');
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Message send failed.';
+      showToast('error', msg);
+    } finally {
+      setMessageLoading(false);
+    }
+  }
 
-  /*
-  DEAL TEXT
-  */
-
-  console.log("Current deal state:", deal);
-
-  const dealText = deal ? `🔥 Amazon Deal
-
-${deal.title}
-
-💰 Price: ₹${deal.price}
-
-🛒 Buy Now:
-${deal.link}
-
-#AmazonDeals #Discount` : "";
-
-
-
-
-
-console.log("Deal Text:", deal);
+  // ── Stats for the generate section header ────────────────────────────────────
+  const totalDeals = recentDeals.length;
+  const postedCount = recentDeals.filter((d) => d.posted).length;
+  const avgSavings =
+    recentDeals.length > 0
+      ? Math.round(
+          recentDeals.reduce((sum, d) => sum + (d.savings || 0), 0) / recentDeals.length
+        )
+      : 0;
 
   return (
+    <div className="flex h-screen overflow-hidden bg-slate-100">
+      {/* Sidebar */}
+      <Sidebar
+        activeSection={activeSection}
+        onNavigate={setActiveSection}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
 
-    <main className="min-h-screen bg-gray-100 py-10 px-4">
+      {/* Main area */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Top navbar */}
+        <Navbar
+          activeSection={activeSection}
+          onMenuToggle={() => setSidebarOpen((v) => !v)}
+        />
 
-      <div className="max-w-4xl mx-auto">
+        {/* Scrollable content */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-4xl mx-auto px-4 lg:px-6 py-6 space-y-5">
 
-        {/* HEADER */}
+            {/* ── GENERATE SECTION ──────────────────────────────────────── */}
+            {activeSection === 'generate' && (
+              <>
+                {/* Stats row */}
+                <div className="grid grid-cols-3 gap-3">
+                  <StatCard
+                    label="Total Deals"
+                    value={totalDeals}
+                    icon="📦"
+                    color="orange"
+                  />
+                  <StatCard
+                    label="Posted"
+                    value={postedCount}
+                    icon="📤"
+                    color="blue"
+                  />
+                  <StatCard
+                    label="Avg Savings"
+                    value={avgSavings > 0 ? `${avgSavings}%` : '—'}
+                    icon="💰"
+                    color="green"
+                  />
+                </div>
 
-        <div className="text-center mb-10">
+                {/* URL form */}
+                <DealGeneratorForm onGenerate={handleGenerate} loading={generating} />
 
-          <h1 className="text-4xl font-bold text-gray-800">
-            🔥 Amazon Deal Generator
-          </h1>
+                {/* Loading skeleton */}
+                {generating && <LoadingSkeleton />}
 
-          <p className="text-gray-600">
-            Generate deals or send custom messages to Telegram
-          </p>
+                {/* Deal preview */}
+                {!generating && deal && (
+                  <DealPreviewCard
+                    deal={deal}
+                    onPostTelegram={handlePostTelegram}
+                    telegramLoading={telegramLoading}
+                  />
+                )}
 
-        </div>
+                {/* Empty state — no deal yet */}
+                {!generating && !deal && (
+                  <div className="bg-white rounded-2xl border border-slate-200 border-dashed p-10 flex flex-col items-center gap-3 text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center text-3xl">
+                      🔍
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-600">No deal generated yet</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Paste an Amazon product URL above and click Generate Deal.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
 
-        {/* AMAZON URL SECTION */}
-
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-
-          <h2 className="text-xl font-semibold mb-4">
-            Generate Deal from Amazon URL
-          </h2>
-
-          <div className="flex gap-3">
-
-            <input
-              value={url}
-              onChange={(e)=>setUrl(e.target.value)}
-              placeholder="Paste Amazon product URL"
-              className="flex-1 border px-4 py-3 rounded-lg text-black"
-            />
-
-            <button
-              onClick={generateDeal}
-              disabled={loading}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-
-              {loading ? "Generating..." : "Generate Deal"}
-
-            </button>
-
-          </div>
-
-        </div>
-
-        {/* CUSTOM MESSAGE SECTION */}
-
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-
-          <h2 className="text-xl font-semibold mb-4">
-            Send Custom Message
-          </h2>
-
-          <textarea
-            value={message}
-            onChange={(e)=>setMessage(e.target.value)}
-            placeholder="Write Telegram message..."
-            rows={4}
-            className="w-full border px-4 py-3 rounded-lg text-black mb-4"
-          />
-
-          <button
-            onClick={sendMessageTelegram}
-            disabled={telegramLoading}
-            className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700"
-          >
-
-            {telegramLoading ? "Sending..." : "📨 Send Message"}
-
-          </button>
-
-        </div>
-
-        {/* ERROR */}
-
-        {error && (
-
-          <div className="bg-red-100 border border-red-300 p-4 mb-6 rounded">
-            <p className="text-red-600">{error}</p>
-          </div>
-
-        )}
-
-        {/* SUCCESS */}
-
-        {success && (
-
-          <div className="bg-green-100 border border-green-300 p-4 mb-6 rounded">
-            <p className="text-green-700">{success}</p>
-          </div>
-
-        )}
-
-        {/* DEAL PREVIEW */}
-
-        {deal && (
-
-          <div className="bg-white rounded-xl shadow-lg p-6">
-
-            <h2 className="text-2xl font-bold mb-6">
-              Generated Deal
-            </h2>
-
-            <div className="grid md:grid-cols-2 gap-8">
-
-              <img
-                src={deal.image}
-                alt={deal.title}
-                className="rounded-lg"
+            {/* ── RECENT DEALS SECTION ──────────────────────────────────── */}
+            {activeSection === 'recent' && (
+              <RecentDealsTable
+                deals={recentDeals}
+                loading={recentLoading}
+                onRefresh={fetchRecentDeals}
               />
+            )}
 
-              <div>
-
-                <h3 className="text-xl font-semibold mb-3 text-gray-800">
-                  {deal.title}
-                </h3>
-
-                <p className="text-3xl text-green-600 font-bold mb-4">
-                  ₹{deal.price} 
-                </p>
-
-                <textarea
-                  readOnly
-                  value={dealText}
-                  rows={7}
-                  className="w-full border rounded-lg p-3 text-sm text-black bg-gray-50 mb-4"
-                />
-
-                <button
-                  onClick={sendDealTelegram}
-                  disabled={telegramLoading}
-                  className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700"
-                >
-
-                  {telegramLoading
-                    ? "Posting..."
-                    : "📤 Post Deal to Telegram"}
-
-                </button>
-
-              </div>
-
-            </div>
-
+            {/* ── CUSTOM MESSAGE SECTION ────────────────────────────────── */}
+            {activeSection === 'message' && (
+              <CustomMessagePanel
+                onSend={handleSendMessage}
+                loading={messageLoading}
+              />
+            )}
           </div>
-
-        )}
-
-
-
-        <div className="mt-8 bg-blue-50 p-6 rounded-xl">
-
-          <h3 className="text-blue-800 font-semibold mb-3">
-            Instructions
-          </h3>
-
-          <ul className="list-disc list-inside text-blue-700 space-y-1">
-
-            <li>Paste Amazon product URL</li>
-
-            <li>Click Generate Deal</li>
-
-            <li>Review the scraped product</li>
-
-            <li>Copy deal text or send to Telegram</li>
-
-            <li>Make sure backend + MongoDB running</li>
-
-          </ul>
-
-        </div>
+        </main>
       </div>
 
-    </main>
+      {/* Toast */}
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
+    </div>
+  );
+}
+
+/* ── Stat card sub-component ───────────────────────────────────────────────── */
+
+const STAT_COLORS = {
+  orange: {
+    bg: 'bg-orange-50',
+    border: 'border-orange-100',
+    text: 'text-orange-600',
+  },
+  blue: {
+    bg: 'bg-blue-50',
+    border: 'border-blue-100',
+    text: 'text-blue-600',
+  },
+  green: {
+    bg: 'bg-green-50',
+    border: 'border-green-100',
+    text: 'text-green-600',
+  },
+};
+
+function StatCard({ label, value, icon, color }) {
+  const c = STAT_COLORS[color] || STAT_COLORS.orange;
+  return (
+    <div className={`rounded-xl border ${c.border} ${c.bg} p-4`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-base">{icon}</span>
+      </div>
+      <p className={`text-xl font-bold ${c.text}`}>{value}</p>
+      <p className="text-xs text-slate-500 mt-0.5 font-medium">{label}</p>
+    </div>
   );
 }
