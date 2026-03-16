@@ -2,8 +2,9 @@
 
 const SECTION_LABELS = {
   generate: 'Generate Deal',
-  recent: 'Recent Deals',
-  message: 'Custom Message',
+  recent:   'Recent Deals',
+  crawler:  'Crawler Status',
+  message:  'Custom Message',
 };
 
 /**

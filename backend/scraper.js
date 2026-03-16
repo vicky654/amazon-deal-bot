@@ -195,55 +195,53 @@ function isProductUrl(url) {
  * Selector arrays are passed in as serialised arguments.
  */
 
-function buildPageEvaluator(dealSelectors, originalSelectors, titleSelectors, imageSelectors) {
-  return () => {
-    function queryText(selectors) {
-      for (const sel of selectors) {
-        const el = document.querySelector(sel);
-        if (el) {
-          const text = (el.innerText || el.textContent || "").trim();
-          if (text) return text;
-        }
+function pageEvaluator(dealSelectors, originalSelectors, titleSelectors, imageSelectors) {
+  function queryText(selectors) {
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el) {
+        const text = (el.innerText || el.textContent || "").trim();
+        if (text) return text;
       }
-      return null;
     }
+    return null;
+  }
 
-    function queryAttr(selectors, attr) {
-      for (const sel of selectors) {
-        const el = document.querySelector(sel);
-        if (el && el[attr]) return el[attr];
-      }
-      return null;
+  function queryAttr(selectors, attr) {
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el[attr]) return el[attr];
     }
+    return null;
+  }
 
-    function parsePrice(text) {
-      if (!text) return null;
-      const n = parseFloat(text.replace(/[^0-9.]/g, ""));
-      return isNaN(n) ? null : n;
-    }
+  function parsePrice(text) {
+    if (!text) return null;
+    const n = parseFloat(text.replace(/[^0-9.]/g, ""));
+    return isNaN(n) ? null : n;
+  }
 
-    const title = queryText(titleSelectors);
-    const priceText = queryText(dealSelectors);
-    const originalText = queryText(originalSelectors);
-    const image = queryAttr(imageSelectors, "src");
+  const title = queryText(titleSelectors);
+  const priceText = queryText(dealSelectors);
+  const originalText = queryText(originalSelectors);
+  const image = queryAttr(imageSelectors, "src");
 
-    const price = parsePrice(priceText);
-    const originalPrice = parsePrice(originalText);
+  const price = parsePrice(priceText);
+  const originalPrice = parsePrice(originalText);
 
-    let savings = null;
-    if (price && originalPrice && originalPrice > price) {
-      savings = Math.round(((originalPrice - price) / originalPrice) * 100);
-    }
+  let savings = null;
+  if (price && originalPrice && originalPrice > price) {
+    savings = Math.round(((originalPrice - price) / originalPrice) * 100);
+  }
 
-    return {
-      title,
-      price,
-      originalPrice,
-      savings,
-      image,
-      link: window.location.href,
-      _debug: { priceText, originalText },
-    };
+  return {
+    title,
+    price,
+    originalPrice,
+    savings,
+    image,
+    link: window.location.href,
+    _debug: { priceText, originalText },
   };
 }
 
@@ -309,12 +307,11 @@ async function scrapeAmazonProduct(url, attempt = 1) {
     }
 
     const raw = await page.evaluate(
-      buildPageEvaluator(
-        DEAL_PRICE_SELECTORS,
-        ORIGINAL_PRICE_SELECTORS,
-        TITLE_SELECTORS,
-        IMAGE_SELECTORS
-      )
+      pageEvaluator,
+      DEAL_PRICE_SELECTORS,
+      ORIGINAL_PRICE_SELECTORS,
+      TITLE_SELECTORS,
+      IMAGE_SELECTORS
     );
 
     if (!raw.title) {

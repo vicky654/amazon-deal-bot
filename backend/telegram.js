@@ -1,183 +1,178 @@
-const TelegramBot = require("node-telegram-bot-api");
-require("dotenv").config();
+const TelegramBot = require('node-telegram-bot-api');
+require('dotenv').config();
+const logger = require('./utils/logger');
 
 /*
-ENV VARIABLES
-*/
+ * ─── INITIALISE BOT ──────────────────────────────────────────────────────────
+ */
 
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT;
-
-/*
-INIT BOT
-*/
 
 let bot = null;
 
 if (TOKEN) {
   bot = new TelegramBot(TOKEN);
-  console.log("✅ Telegram bot initialized");
+  logger.info('Telegram bot initialised');
 } else {
-  console.log("⚠️ TELEGRAM_TOKEN missing in .env");
+  logger.warn('TELEGRAM_TOKEN missing — Telegram posting disabled');
 }
 
 /*
-FORMAT AMAZON DEAL TEXT
-*/
+ * ─── MESSAGE FORMATTER ───────────────────────────────────────────────────────
+ */
 
+/**
+ * Format a deal into a Telegram-ready HTML caption.
+ *
+ * Output example:
+ *   🔥 <b>71% OFF</b> — Amazon Deal
+ *
+ *   Samsung Galaxy Buds Pro
+ *
+ *   🏷 MRP: <s>₹14,999</s>
+ *   💰 Deal Price: <b>₹4,299</b>
+ *   ⚡ You Save: <b>71%  (₹10,700)</b>
+ *
+ *   🛒 <a href="...">Buy Now on Amazon</a>
+ */
 function formatDealText(title, price, link, originalPrice, savings) {
+  // Compute savings if not provided
+  let savingsPct = savings;
+  let savedAmount = null;
 
-  const merchant = "Amazon";
-
-  const formattedPrice = price ? `₹${price}` : "Check Price";
-  const formattedOriginal = originalPrice ? `₹${originalPrice}` : "N/A";
-
-  let formattedSavings = "N/A";
-
-  if (savings) {
-    formattedSavings = `${savings}%`;
-  } 
-  else if (originalPrice && price) {
-    const calc = Math.round(((originalPrice - price) / originalPrice) * 100);
-    formattedSavings = `${calc}%`;
+  if (!savingsPct && originalPrice && price && originalPrice > price) {
+    savingsPct = Math.round(((originalPrice - price) / originalPrice) * 100);
   }
 
-  return `🔥 Amazon Deal
+  if (originalPrice && price) {
+    savedAmount = Math.round(originalPrice - price).toLocaleString('en-IN');
+  }
 
-${title}
+  const formattedPrice    = price         ? `₹${Number(price).toLocaleString('en-IN')}`         : 'Check Price';
+  const formattedOriginal = originalPrice ? `₹${Number(originalPrice).toLocaleString('en-IN')}` : null;
 
-Merchant: ${merchant}
+  // Header line — highlight the discount prominently
+  const header = savingsPct
+    ? `🔥 <b>${savingsPct}% OFF</b> — Amazon Deal`
+    : '🔥 Amazon Deal';
 
-Original Price: ${formattedOriginal}
-Deal Price: ${formattedPrice}
-Savings: ${formattedSavings}
+  const lines = [
+    header,
+    '',
+    `<b>${escapeHtml(title)}</b>`,
+    '',
+  ];
 
-🛒 Buy Now:
-${link}
+  if (formattedOriginal) {
+    lines.push(`🏷 MRP: <s>${formattedOriginal}</s>`);
+  }
 
-Sent on <a href="https://t.me/+NJWXP0z-Sb00YThl">Daily Amazon Deals Telegram Channel</a>`;
+  lines.push(`💰 Deal Price: <b>${formattedPrice}</b>`);
+
+  if (savingsPct) {
+    const savingsLine = savedAmount
+      ? `⚡ You Save: <b>${savingsPct}% (₹${savedAmount})</b>`
+      : `⚡ You Save: <b>${savingsPct}%</b>`;
+    lines.push(savingsLine);
+  }
+
+  lines.push('');
+  lines.push(`🛒 <a href="${link}">Buy Now on Amazon</a>`);
+  lines.push('');
+  lines.push(`📢 <a href="https://t.me/+NJWXP0z-Sb00YThl">Daily Amazon Deals Channel</a>`);
+
+  return lines.join('\n');
+}
+
+/**
+ * Escape characters that have special meaning in Telegram HTML mode.
+ */
+function escapeHtml(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 /*
-SEND DEAL TO TELEGRAM
-(IMAGE + CAPTION)
-*/
+ * ─── SEND TO TELEGRAM ────────────────────────────────────────────────────────
+ */
 
+/**
+ * Send a deal to Telegram — photo + caption if image available, text-only fallback.
+ */
 async function sendToTelegram(imageUrl, caption) {
-
   if (!bot || !CHAT_ID) {
-    console.log("⚠️ Telegram not configured");
+    logger.warn('Telegram not configured — skipping post');
     return null;
   }
 
-  try {
-
-    // SEND WITH IMAGE
-    if (imageUrl) {
-
-      const result = await bot.sendPhoto(CHAT_ID, imageUrl, {
-        caption: caption,
-        parse_mode: "HTML"
-      });
-
-      console.log("📤 Deal sent to Telegram with image");
-
-      return result;
-    }
-
-    // SEND TEXT ONLY
-    const result = await bot.sendMessage(CHAT_ID, caption);
-
-    console.log("📤 Deal sent as text");
-
-    return result;
-
-  } catch (error) {
-
-    console.error("❌ Telegram send error:", error.message);
-
+  // Try sending with image
+  if (imageUrl) {
     try {
-
-      const fallback = await bot.sendMessage(CHAT_ID, caption);
-
-      console.log("⚠️ Image failed, sent text instead");
-
-      return fallback;
-
-    } catch (err) {
-
-      console.error("❌ Telegram fallback failed:", err.message);
-      throw err;
-
+      const result = await bot.sendPhoto(CHAT_ID, imageUrl, {
+        caption,
+        parse_mode: 'HTML',
+      });
+      logger.info('Deal sent to Telegram (with image)');
+      return result;
+    } catch (error) {
+      // Image send failed (bad URL, size limit, etc.) — fall through to text-only
+      logger.warn(`Image send failed: ${error.message} — falling back to text`);
     }
+  }
+
+  // Text-only fallback
+  try {
+    const result = await bot.sendMessage(CHAT_ID, caption, { parse_mode: 'HTML' });
+    logger.info('Deal sent to Telegram (text-only)');
+    return result;
+  } catch (error) {
+    logger.error(`Telegram send failed: ${error.message}`);
+    throw error;
   }
 }
 
-/*
-SEND CUSTOM MESSAGE
-*/
-
+/**
+ * Send an arbitrary text message to Telegram (custom message feature).
+ */
 async function sendMessageToTelegram(message) {
-
   if (!bot || !CHAT_ID) {
-    console.log("⚠️ Telegram not configured");
+    logger.warn('Telegram not configured — skipping message');
     return null;
   }
 
   try {
-
     const result = await bot.sendMessage(CHAT_ID, message);
-
-    console.log("📨 Custom message sent to Telegram");
-
+    logger.info('Custom message sent to Telegram');
     return result;
-
   } catch (error) {
-
-    console.error("❌ Telegram message error:", error.message);
+    logger.error(`Telegram message failed: ${error.message}`);
     throw error;
-
   }
 }
 
-/*
-TEST BOT
-*/
-
+/**
+ * Send a test ping to verify the bot is configured correctly.
+ */
 async function sendTestMessage() {
-
-  if (!bot || !CHAT_ID) {
-    console.log("⚠️ Telegram not configured");
-    return false;
-  }
+  if (!bot || !CHAT_ID) return false;
 
   try {
-
-    await bot.sendMessage(
-      CHAT_ID,
-      "✅ Deal System Bot is running!"
-    );
-
-    console.log("🧪 Test message sent");
-
+    await bot.sendMessage(CHAT_ID, '✅ DealBot is running and connected!');
+    logger.info('Telegram test message sent');
     return true;
-
   } catch (error) {
-
-    console.error("❌ Test message failed:", error.message);
-
+    logger.error(`Telegram test failed: ${error.message}`);
     return false;
-
   }
 }
-
-/*
-EXPORT FUNCTIONS
-*/
 
 module.exports = {
   sendToTelegram,
   sendMessageToTelegram,
   formatDealText,
-  sendTestMessage
+  sendTestMessage,
 };

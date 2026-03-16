@@ -10,6 +10,7 @@ import DealPreviewCard from '../components/DealPreviewCard';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import RecentDealsTable from '../components/RecentDealsTable';
 import CustomMessagePanel from '../components/CustomMessagePanel';
+import CrawlerPanel from '../components/CrawlerPanel';
 import Toast from '../components/Toast';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
@@ -212,6 +213,11 @@ export default function Dashboard() {
                 loading={recentLoading}
                 onRefresh={fetchRecentDeals}
               />
+            )}
+
+            {/* ── CRAWLER SECTION ───────────────────────────────────────── */}
+            {activeSection === 'crawler' && (
+              <CrawlerPanel onToast={showToast} />
             )}
 
             {/* ── CUSTOM MESSAGE SECTION ────────────────────────────────── */}
