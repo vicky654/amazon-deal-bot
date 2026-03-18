@@ -13,9 +13,11 @@ const crawlerRouter       = require('./src/routes/crawler');
 const healthRouter        = require('./src/routes/health');
 const earnkaroRouter      = require('./src/routes/earnkaro');
 const reelsRouter         = require('./src/routes/reels');
+const systemRouter        = require('./src/routes/system');
 const { closeBrowser }    = require('./src/scraper/browser');
 const { getQueueStats }   = require('./src/queue');
 const earnkaroAutoRefresh = require('./src/services/earnkaroAutoRefresh');
+const { state: cronState, addLog: cronLog, parseIntervalMinutes } = require('./src/cronState');
 
 // ── Legacy modules (kept for backward compat during migration) ─────────────
 const telegram = require('./telegram');
@@ -31,8 +33,8 @@ if (missingEnv.length) {
   logger.warn(`Missing env vars: ${missingEnv.join(', ')} — some features disabled`);
 }
 
-const PORT       = process.env.PORT        || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/deal-system';
+const PORT          = process.env.PORT          || 5000;
+const MONGODB_URI   = process.env.MONGODB_URI   || 'mongodb://localhost:27017/deal-system';
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/5 * * * *'; // every 5 min
 
 /*
@@ -40,7 +42,24 @@ const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/5 * * * *'; // every 5 min
  */
 
 const app = express();
-app.use(cors());
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
+// Allow ALLOWED_ORIGINS env var (comma-separated) for strict whitelisting.
+// Falls back to open CORS for backward compatibility.
+const rawOrigins = process.env.ALLOWED_ORIGINS;
+const corsOptions = rawOrigins
+  ? {
+      origin(origin, callback) {
+        const list = rawOrigins.split(',').map((o) => o.trim());
+        // Allow same-origin (non-browser) or whitelisted origins
+        if (!origin || list.includes(origin)) return callback(null, true);
+        callback(new Error(`CORS: origin "${origin}" not allowed`));
+      },
+      credentials: true,
+    }
+  : { origin: '*' };
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));
 
 // Serve generated reels (and other static assets from backend/public/)
@@ -68,20 +87,29 @@ mongoose
  * Override via CRON_SCHEDULE env var (e.g. "star/10 * * * *" for every 10 min).
  */
 
-let cronRunning = false;
+const cronIntervalMs = parseIntervalMinutes(CRON_SCHEDULE) * 60 * 1000;
 
 cron.schedule(CRON_SCHEDULE, async () => {
-  if (cronRunning) {
+  if (cronState.running) {
     logger.warn('Cron: previous cycle still running — skipping tick');
+    cronLog('Skipped — previous cycle still running');
     return;
   }
-  cronRunning = true;
+
+  const now = new Date();
+  cronState.running = true;
+  cronState.lastRun = now.toISOString();
+  cronState.nextRun = new Date(now.getTime() + cronIntervalMs).toISOString();
+  cronLog('Cron cycle started');
+
   try {
     await newCrawler.runCrawlCycle();
+    cronLog('Crawl cycle completed successfully');
   } catch (err) {
     logger.error(`Cron cycle threw: ${err.message}`);
+    cronLog(`Error: ${err.message}`);
   } finally {
-    cronRunning = false;
+    cronState.running = false;
   }
 });
 
@@ -94,6 +122,7 @@ app.use('/api/deals',    dealsRouter);
 app.use('/api/crawler',  crawlerRouter);
 app.use('/api/earnkaro', earnkaroRouter);
 app.use('/api/reels',    reelsRouter);
+app.use('/api/system',   systemRouter);
 app.use('/',             healthRouter);
 
 // ── Legacy endpoints (frontend currently calls these) ─────────────────────────
@@ -127,6 +156,7 @@ app.post('/telegram-message', async (req, res) => {
     const result = await telegram.sendMessageToTelegram(message);
     res.json({ success: true, result });
   } catch (err) {
+    logger.error(`/telegram-message: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -137,7 +167,7 @@ app.get('/api/crawler/status', async (req, res) => {
     const CrawlerRun = require('./src/models/CrawlerRun');
     const runs = await CrawlerRun.find().sort({ startedAt: -1 }).limit(10).lean();
     res.json({
-      isRunning:  cronRunning,
+      isRunning:  cronState.running,
       queueStats: getQueueStats(),
       recentRuns: runs,
     });
@@ -178,7 +208,8 @@ process.on('SIGINT',  () => shutdown('SIGINT'));
 if (require.main === module) {
   app.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`);
-    logger.info(`Cron: ${CRON_SCHEDULE}`);
+    logger.info(`Cron: ${CRON_SCHEDULE} (interval ~${parseIntervalMinutes(CRON_SCHEDULE)} min)`);
+    logger.info(`CORS: ${rawOrigins ? `restricted to ${rawOrigins}` : 'open (*)'}`);
     telegram.sendTestMessage().catch(() => {});
 
     // Start EarnKaro auto-refresh cron (independent of main crawler)

@@ -12,6 +12,7 @@ import {
   BarChart2,
   ListChecks,
   Video,
+  Cpu,
 } from 'lucide-react';
 
 const MENU = [
@@ -35,8 +36,9 @@ const MENU = [
   {
     section: 'System',
     items: [
-      { label: 'How It Works', href: '/admin/how-it-works', icon: Info }, // FIXED
-      { label: 'System Metrics', href: '/admin/metrics', icon: BarChart2 },
+      { label: 'Cron Monitor',   href: '/admin/system',      icon: Cpu,      badge: 'Live' },
+      { label: 'How It Works',   href: '/admin/how-it-works', icon: Info },
+      { label: 'System Metrics', href: '/admin/metrics',      icon: BarChart2 },
     ],
   },
 ];

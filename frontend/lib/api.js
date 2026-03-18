@@ -191,4 +191,14 @@ export const healthApi = {
   metrics() { return request('/metrics'); },
 };
 
+// ── System ────────────────────────────────────────────────────────────────────
+
+export const systemApi = {
+  /** Live cron status: running, lastRun, nextRun, logs[] */
+  cronStatus() { return request('/api/system/cron-status'); },
+
+  /** Telegram config diagnostics (no secrets exposed) */
+  telegramDebug() { return request('/api/system/telegram-debug'); },
+};
+
 export { ApiError };
