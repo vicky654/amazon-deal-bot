@@ -49,8 +49,8 @@ export default function AdminShell({ children }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto w-full">
-          <div className="mx-auto w-full max-w-7xl px-4 py-6">{children}</div>
+        <main className="flex-1 overflow-y-auto w-full [-webkit-overflow-scrolling:touch]">
+          <div className="mx-auto w-full max-w-7xl px-3 sm:px-4 py-4 sm:py-6">{children}</div>
         </main>
       </div>
     </div>

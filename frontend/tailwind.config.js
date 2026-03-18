@@ -22,6 +22,24 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Hide scrollbar on mobile filter row while keeping scroll functional
+    function ({ addUtilities }) {
+      addUtilities({
+        '.scrollbar-none': {
+          '-ms-overflow-style': 'none',
+          'scrollbar-width': 'none',
+          '&::-webkit-scrollbar': { display: 'none' },
+        },
+        '.scrollbar-thin': {
+          'scrollbar-width': 'thin',
+          'scrollbar-color': '#d1d5db transparent',
+          '&::-webkit-scrollbar': { height: '4px', width: '4px' },
+          '&::-webkit-scrollbar-track': { background: 'transparent' },
+          '&::-webkit-scrollbar-thumb': { background: '#d1d5db', borderRadius: '9999px' },
+        },
+      });
+    },
+  ],
 }
 

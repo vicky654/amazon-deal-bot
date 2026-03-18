@@ -52,8 +52,8 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       {/* Deal header bar */}
-      <div className="bg-gradient-to-r from-orange-500 to-orange-400 px-5 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="bg-gradient-to-r from-orange-500 to-orange-400 px-4 sm:px-5 py-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <span className="text-white font-semibold text-sm">Deal Preview</span>
           {discountPct != null && (
             <span className="bg-white text-orange-600 text-xs font-bold px-2 py-0.5 rounded-full">
@@ -62,11 +62,13 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
           )}
         </div>
         {deal.asin && (
-          <span className="text-orange-100 text-xs font-mono">ASIN: {deal.asin}</span>
+          <span className="text-orange-100 text-xs font-mono truncate max-w-[120px] sm:max-w-none">
+            ASIN: {deal.asin}
+          </span>
         )}
       </div>
 
-      <div className="p-5">
+      <div className="p-4 sm:p-5">
         <div className="grid md:grid-cols-5 gap-5">
           {/* Product image */}
           <div className="md:col-span-2">

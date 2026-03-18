@@ -207,13 +207,13 @@ export default function CrawlerPanel({ onToast }) {
 
       {/* Live status card */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0 ${isRunning ? 'bg-blue-50 border border-blue-100' : 'bg-orange-50 border border-orange-100'}`}>
               {isRunning ? '⚙️' : '🔍'}
             </div>
-            <div>
-              <h2 className="text-base font-semibold text-slate-900">Crawler Status</h2>
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-base font-semibold text-slate-900">Crawler Status</h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 {isRunning ? 'Crawl cycle in progress…' : 'Idle — scheduled every 5 min'}
               </p>
@@ -261,7 +261,7 @@ export default function CrawlerPanel({ onToast }) {
 
         {/* Live queue stats (visible while running) */}
         {isRunning && (
-          <div className="grid grid-cols-4 gap-2 mb-4 p-3 bg-blue-50 border border-blue-100 rounded-xl">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4 p-3 bg-blue-50 border border-blue-100 rounded-xl">
             <MiniStat label="Pending"   value={queueStats.pending}        color="blue"   />
             <MiniStat label="Active"    value={queueStats.active}         color="orange" />
             <MiniStat label="Processed" value={queueStats.processed}      color="green"  />

@@ -540,18 +540,27 @@ export default function ReelModal({ deal, onClose }) {
     setCached(false);
   }, []);
 
-  // ── Render ───────────────────────────────────────────────────────────────────
-
+  // Mobile: bottom-sheet sliding up from the bottom edge
+  // Desktop (sm+): centered dialog
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 sm:p-6"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm sm:p-6"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col max-h-[93vh] overflow-hidden"
-           style={{ boxShadow: '0 25px 80px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06)' }}>
+      <div
+        className="relative w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col"
+        style={{
+          maxHeight: 'calc(100dvh - 48px)',
+          boxShadow: '0 25px 80px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06)',
+        }}
+      >
+        {/* Mobile drag handle */}
+        <div className="sm:hidden flex justify-center pt-3 pb-1 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-gray-300" />
+        </div>
 
         {/* ── Header ── */}
-        <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 shrink-0 bg-white">
+        <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-gray-100 flex items-center justify-between gap-3 shrink-0 bg-white rounded-t-2xl">
           <div className="flex items-center gap-3 min-w-0">
             <div
               className="h-9 w-9 rounded-xl flex items-center justify-center text-lg shrink-0"
@@ -561,12 +570,14 @@ export default function ReelModal({ deal, onClose }) {
             </div>
             <div className="min-w-0">
               <h2 className="text-sm font-bold text-gray-900">Instagram Reel Assistant</h2>
-              <p className="text-[11px] text-gray-400 truncate mt-0.5">{deal.title}</p>
+              <p className="text-[11px] text-gray-400 truncate mt-0.5 max-w-[220px] sm:max-w-none">
+                {deal.title}
+              </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="shrink-0 h-8 w-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-all"
+            className="shrink-0 h-8 w-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-all touch-manipulation"
           >
             <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd"
@@ -579,22 +590,24 @@ export default function ReelModal({ deal, onClose }) {
         {/* ── Tabs (after generation) ── */}
         {status === 'done' && <TabBar active={activeTab} onChange={setActiveTab} />}
 
-        {/* ── Body ── */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ scrollbarWidth: 'thin' }}>
-
-          {/* ══ IDLE ══ */}
-          {status === 'idle' && (
-            <>
+        {/* ══════════════════════════════════════════
+            IDLE STATE
+            Body scrolls; Generate CTA is sticky at bottom
+        ══════════════════════════════════════════ */}
+        {status === 'idle' && (
+          <>
+            <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2 space-y-4 [-webkit-overflow-scrolling:touch]" style={{ scrollbarWidth: 'thin' }}>
               {/* Deal preview card */}
-              <div className="flex items-center gap-3 p-3.5 bg-gray-50 rounded-xl border border-gray-100">
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
                 {deal.image && (
                   <img
                     src={deal.image} alt=""
-                    className="h-16 w-16 rounded-xl object-contain bg-white border border-gray-100 shrink-0"
+                    loading="lazy"
+                    className="h-14 w-14 rounded-xl object-contain bg-white border border-gray-100 shrink-0"
                   />
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-gray-800 line-clamp-2">{deal.title}</p>
+                  <p className="text-xs font-medium text-gray-800 line-clamp-2 leading-snug">{deal.title}</p>
                   <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     {deal.price && (
                       <span className="text-sm font-bold text-emerald-600">
@@ -618,20 +631,19 @@ export default function ReelModal({ deal, onClose }) {
               {/* Template picker */}
               <div>
                 <p className="text-xs font-semibold text-gray-700 mb-2.5">Choose Template</p>
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-3 gap-2">
                   {TEMPLATES.map((tpl) => (
                     <button
                       key={tpl.id}
                       onClick={() => setTemplate(tpl.id)}
-                      className={`group flex flex-col items-center gap-2 p-3.5 rounded-xl border-2 transition-all text-center ${
+                      className={`group flex flex-col items-center gap-1.5 p-2.5 sm:p-3.5 rounded-xl border-2 transition-all text-center touch-manipulation ${
                         template === tpl.id
                           ? 'border-violet-500 shadow-sm shadow-violet-100'
                           : 'border-gray-200 hover:border-gray-300'
                       }`}
                     >
-                      {/* Mini preview swatch */}
                       <div
-                        className="h-10 w-full rounded-lg border border-black/10"
+                        className="h-9 sm:h-10 w-full rounded-lg border border-black/10"
                         style={{ background: tpl.preview }}
                       >
                         {template === tpl.id && (
@@ -644,7 +656,7 @@ export default function ReelModal({ deal, onClose }) {
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-gray-800">{tpl.label}</p>
-                        <p className="text-[10px] text-gray-400 mt-0.5">{tpl.desc}</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5 hidden sm:block">{tpl.desc}</p>
                       </div>
                     </button>
                   ))}
@@ -660,198 +672,173 @@ export default function ReelModal({ deal, onClose }) {
                 </svg>
                 <span>
                   Generates <strong>1080×1920 MP4</strong> + ready-to-paste Instagram caption + hashtags.
-                  Download & post manually — no Instagram automation.
+                  Download &amp; post manually — no Instagram automation.
                 </span>
               </div>
+            </div>
 
-              {/* Generate button */}
+            {/* Sticky generate CTA — always visible at bottom */}
+            <div className="px-4 pt-3 pb-4 sm:pb-4 shrink-0 border-t border-gray-100 bg-white">
               <button
                 onClick={handleGenerate}
-                className="w-full flex items-center justify-center gap-2.5 px-4 py-3.5 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98]"
+                className="w-full flex items-center justify-center gap-2.5 px-4 py-3.5 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] touch-manipulation"
                 style={{ background: 'linear-gradient(135deg,#7c3aed,#ec4899)', boxShadow: '0 4px 20px rgba(124,58,237,0.30)' }}
               >
-                <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                     d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
                 Generate Reel + Caption
               </button>
-            </>
-          )}
+            </div>
+          </>
+        )}
 
-          {/* ══ GENERATING ══ */}
-          {status === 'generating' && <GeneratingState />}
+        {/* ══ GENERATING ══ */}
+        {status === 'generating' && (
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            <GeneratingState />
+          </div>
+        )}
 
-          {/* ══ DONE ══ */}
-          {status === 'done' && fullVideoUrl && (
-            <>
-              {/* ─ VIDEO TAB ─ */}
-              {activeTab === 'video' && (
-                <div className="space-y-4">
-                  {/* Status banner */}
-                  <div className="flex items-center gap-2 px-3.5 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-medium">
-                    <div className="h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
-                      <CheckIcon size={11} />
-                    </div>
-                    {cached ? 'Loaded from cache — ready to use' : 'Reel generated successfully!'}
-                    <span className="ml-auto text-[10px] text-emerald-600 opacity-70">
-                      {template} template
-                    </span>
+        {/* ══ DONE ══ */}
+        {status === 'done' && fullVideoUrl && (
+          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-4 space-y-4 [-webkit-overflow-scrolling:touch]" style={{ scrollbarWidth: 'thin' }}>
+            {/* ─ VIDEO TAB ─ */}
+            {activeTab === 'video' && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 px-3.5 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-medium">
+                  <div className="h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                    <CheckIcon size={11} />
                   </div>
-
-                  {/* Video preview */}
-                  <ReelPreview videoUrl={fullVideoUrl} />
-
-                  {/* Action buttons */}
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <button
-                      onClick={handleDownload}
-                      disabled={downloading}
-                      className="flex items-center justify-center gap-2 px-3 py-3 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-bold rounded-xl transition-all active:scale-[0.97]"
-                    >
-                      {downloading
-                        ? <><Spinner size={14} color="white" /> Downloading…</>
-                        : <><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                          </svg> Download MP4</>
-                      }
-                    </button>
-
-                    <a
-                      href="https://www.instagram.com/create/reels/"
-                      target="_blank" rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-2 px-3 py-3 text-white text-xs font-bold rounded-xl hover:opacity-90 transition-all active:scale-[0.97]"
-                      style={{ background: 'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)' }}
-                    >
-                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                      </svg>
-                      Open Instagram
-                    </a>
-                  </div>
-
-                  {/* Quick copy row */}
-                  <div className="flex gap-2">
-                    <CopyButton label="Copy Caption" onCopy={handleCopyCaption} copied={captionCopied} className="flex-1 justify-center py-2" />
-                    <CopyButton label="Caption + Tags" onCopy={handleCopyAll} copied={allCopied} className="flex-1 justify-center py-2" />
-                  </div>
-
-                  {/* Template / regenerate row */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleReset}
-                      className="flex-1 text-xs text-gray-500 border border-gray-200 rounded-xl py-2 hover:bg-gray-50 transition-colors"
-                    >
-                      Change template
-                    </button>
-                    <button
-                      onClick={handleGenerate}
-                      className="flex-1 text-xs text-violet-600 border border-violet-200 rounded-xl py-2 hover:bg-violet-50 transition-colors"
-                    >
-                      Regenerate
-                    </button>
-                  </div>
+                  {cached ? 'Loaded from cache — ready to use' : 'Reel generated successfully!'}
+                  <span className="ml-auto text-[10px] text-emerald-600 opacity-70">
+                    {template} template
+                  </span>
                 </div>
-              )}
 
-              {/* ─ CAPTION TAB ─ */}
-              {activeTab === 'caption' && (
-                <CaptionPanel
-                  caption={caption}
-                  setCaption={setCaption}
-                  hashtags={hashtags}
-                  activeHashtags={activeHashtags}
-                  toggleHashtag={toggleHashtag}
-                  onCopyCaption={handleCopyCaption}
-                  onCopyAll={handleCopyAll}
-                  captionCopied={captionCopied}
-                  allCopied={allCopied}
-                />
-              )}
+                <ReelPreview videoUrl={fullVideoUrl} />
 
-              {/* ─ PUBLISH TAB ─ */}
-              {activeTab === 'publish' && (
-                <div className="space-y-4">
-                  <PostingGuide
-                    onDownload={handleDownload}
-                    onCopyAll={handleCopyAll}
-                    allCopied={allCopied}
-                  />
-
-                  {/* Quick actions */}
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <button
-                      onClick={handleDownload}
-                      disabled={downloading}
-                      className="flex items-center justify-center gap-2 py-3 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-bold rounded-xl transition-all"
-                    >
-                      {downloading
-                        ? <><Spinner size={13} color="white" /> Fetching…</>
-                        : <><svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                          </svg> Download</>
-                      }
-                    </button>
-                    <button
-                      onClick={handleCopyAll}
-                      className={`flex items-center justify-center gap-2 py-3 text-xs font-bold rounded-xl transition-all border-2 ${
-                        allCopied
-                          ? 'bg-emerald-500 border-emerald-500 text-white'
-                          : 'border-violet-400 text-violet-700 hover:bg-violet-50'
-                      }`}
-                    >
-                      {allCopied
-                        ? <><CheckIcon size={13} /> Copied!</>
-                        : <><svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg> Copy Caption</>
-                      }
-                    </button>
-                  </div>
-
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    onClick={handleDownload}
+                    disabled={downloading}
+                    className="flex items-center justify-center gap-2 px-3 py-3 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-bold rounded-xl transition-all active:scale-[0.97] touch-manipulation"
+                  >
+                    {downloading
+                      ? <><Spinner size={14} color="white" /> Downloading…</>
+                      : <><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg> Download MP4</>
+                    }
+                  </button>
                   <a
                     href="https://www.instagram.com/create/reels/"
                     target="_blank" rel="noopener noreferrer"
-                    className="w-full flex items-center justify-center gap-2.5 py-3.5 text-white text-sm font-bold rounded-xl hover:opacity-90 transition-all"
-                    style={{ background: 'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)', boxShadow: '0 4px 16px rgba(131,58,180,0.25)' }}
+                    className="flex items-center justify-center gap-2 px-3 py-3 text-white text-xs font-bold rounded-xl hover:opacity-90 transition-all active:scale-[0.97] touch-manipulation"
+                    style={{ background: 'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)' }}
                   >
                     <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
                     </svg>
-                    Open Instagram Reels
+                    Open Instagram
                   </a>
                 </div>
-              )}
-            </>
-          )}
 
-          {/* ══ ERROR ══ */}
-          {status === 'error' && (
-            <div className="space-y-4">
-              <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
-                <div className="h-8 w-8 rounded-full bg-red-100 flex items-center justify-center shrink-0">
-                  <svg className="h-4 w-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd"
-                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                      clipRule="evenodd" />
-                  </svg>
+                <div className="flex gap-2">
+                  <CopyButton label="Copy Caption"   onCopy={handleCopyCaption} copied={captionCopied} className="flex-1 justify-center py-2.5" />
+                  <CopyButton label="Caption + Tags" onCopy={handleCopyAll}     copied={allCopied}     className="flex-1 justify-center py-2.5" />
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-red-800">Generation failed</p>
-                  <p className="text-xs text-red-600 mt-1.5 font-mono bg-red-100/60 rounded-lg px-2.5 py-2 leading-relaxed">
-                    {error}
-                  </p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={handleReset}    className="text-xs text-gray-500 border border-gray-200 rounded-xl py-2.5 hover:bg-gray-50 transition-colors touch-manipulation">Change template</button>
+                  <button onClick={handleGenerate} className="text-xs text-violet-600 border border-violet-200 rounded-xl py-2.5 hover:bg-violet-50 transition-colors touch-manipulation">Regenerate</button>
                 </div>
               </div>
-              <button
-                onClick={handleReset}
-                className="w-full text-sm font-semibold text-gray-700 border border-gray-200 rounded-xl py-2.5 hover:bg-gray-50 transition-colors"
-              >
-                Try again
-              </button>
+            )}
+
+            {/* ─ CAPTION TAB ─ */}
+            {activeTab === 'caption' && (
+              <CaptionPanel
+                caption={caption}             setCaption={setCaption}
+                hashtags={hashtags}           activeHashtags={activeHashtags}
+                toggleHashtag={toggleHashtag} onCopyCaption={handleCopyCaption}
+                onCopyAll={handleCopyAll}     captionCopied={captionCopied}
+                allCopied={allCopied}
+              />
+            )}
+
+            {/* ─ PUBLISH TAB ─ */}
+            {activeTab === 'publish' && (
+              <div className="space-y-4">
+                <PostingGuide onDownload={handleDownload} onCopyAll={handleCopyAll} allCopied={allCopied} />
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    onClick={handleDownload} disabled={downloading}
+                    className="flex items-center justify-center gap-2 py-3 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-bold rounded-xl transition-all touch-manipulation"
+                  >
+                    {downloading
+                      ? <><Spinner size={13} color="white" /> Fetching…</>
+                      : <><svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg> Download</>
+                    }
+                  </button>
+                  <button
+                    onClick={handleCopyAll}
+                    className={`flex items-center justify-center gap-2 py-3 text-xs font-bold rounded-xl transition-all border-2 touch-manipulation ${
+                      allCopied ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-violet-400 text-violet-700 hover:bg-violet-50'
+                    }`}
+                  >
+                    {allCopied
+                      ? <><CheckIcon size={13} /> Copied!</>
+                      : <><svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg> Copy Caption</>
+                    }
+                  </button>
+                </div>
+
+                <a
+                  href="https://www.instagram.com/create/reels/"
+                  target="_blank" rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center gap-2.5 py-3.5 text-white text-sm font-bold rounded-xl hover:opacity-90 transition-all touch-manipulation"
+                  style={{ background: 'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)', boxShadow: '0 4px 16px rgba(131,58,180,0.25)' }}
+                >
+                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                  </svg>
+                  Open Instagram Reels
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══ ERROR ══ */}
+        {status === 'error' && (
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
+              <div className="h-8 w-8 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <svg className="h-4 w-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-red-800">Generation failed</p>
+                <p className="text-xs text-red-600 mt-1.5 font-mono bg-red-100/60 rounded-lg px-2.5 py-2 leading-relaxed break-all">
+                  {error}
+                </p>
+              </div>
             </div>
-          )}
-        </div>
+            <button
+              onClick={handleReset}
+              className="w-full text-sm font-semibold text-gray-700 border border-gray-200 rounded-xl py-3 hover:bg-gray-50 transition-colors touch-manipulation"
+            >
+              Try again
+            </button>
+          </div>
+        )}
 
         {/* ── Toast ── */}
         <Toast toast={toast} onDismiss={() => setToast(null)} />
