@@ -36,26 +36,43 @@ if (TOKEN) {
  *
  *   🛒 <a href="...">Buy Now on Amazon</a>
  */
-function formatDealText(title, price, link, originalPrice, savings) {
-  // Compute savings if not provided
-  let savingsPct = savings;
-  let savedAmount = null;
+const PLATFORM_META = {
+  amazon:   { label: 'Amazon',   emoji: '🛒', color: '🟠' },
+  flipkart: { label: 'Flipkart', emoji: '🟡', color: '🟡' },
+  myntra:   { label: 'Myntra',   emoji: '👗', color: '🩷' },
+  ajio:     { label: 'Ajio',     emoji: '👠', color: '🔴' },
+  manual:   { label: 'Deal',     emoji: '🛍️', color: '🔵' },
+};
 
+/**
+ * Format a deal into a Telegram-ready HTML caption.
+ *
+ * @param {string} title
+ * @param {number} price
+ * @param {string} link          Affiliate link
+ * @param {number} originalPrice
+ * @param {number} discount      Percentage
+ * @param {string} platformEmoji Optional override emoji
+ * @param {string} platform      'amazon' | 'flipkart' | 'myntra' | 'ajio'
+ */
+function formatDealText(title, price, link, originalPrice, discount, platformEmoji, platform = 'amazon') {
+  const meta = PLATFORM_META[platform] || PLATFORM_META.manual;
+
+  let savingsPct = discount;
   if (!savingsPct && originalPrice && price && originalPrice > price) {
     savingsPct = Math.round(((originalPrice - price) / originalPrice) * 100);
   }
 
-  if (originalPrice && price) {
-    savedAmount = Math.round(originalPrice - price).toLocaleString('en-IN');
-  }
+  const savedAmount = (originalPrice && price)
+    ? Math.round(originalPrice - price).toLocaleString('en-IN')
+    : null;
 
   const formattedPrice    = price         ? `₹${Number(price).toLocaleString('en-IN')}`         : 'Check Price';
   const formattedOriginal = originalPrice ? `₹${Number(originalPrice).toLocaleString('en-IN')}` : null;
 
-  // Header line — highlight the discount prominently
   const header = savingsPct
-    ? `🔥 <b>${savingsPct}% OFF</b> — Amazon Deal`
-    : '🔥 Amazon Deal';
+    ? `🔥 <b>${savingsPct}% OFF</b> — ${meta.label} Deal`
+    : `🔥 ${meta.label} Deal`;
 
   const lines = [
     header,
@@ -64,23 +81,21 @@ function formatDealText(title, price, link, originalPrice, savings) {
     '',
   ];
 
-  if (formattedOriginal) {
-    lines.push(`🏷 MRP: <s>${formattedOriginal}</s>`);
-  }
-
+  if (formattedOriginal) lines.push(`🏷 MRP: <s>${formattedOriginal}</s>`);
   lines.push(`💰 Deal Price: <b>${formattedPrice}</b>`);
 
   if (savingsPct) {
-    const savingsLine = savedAmount
-      ? `⚡ You Save: <b>${savingsPct}% (₹${savedAmount})</b>`
-      : `⚡ You Save: <b>${savingsPct}%</b>`;
-    lines.push(savingsLine);
+    lines.push(
+      savedAmount
+        ? `⚡ You Save: <b>${savingsPct}% (₹${savedAmount})</b>`
+        : `⚡ You Save: <b>${savingsPct}%</b>`
+    );
   }
 
   lines.push('');
-  lines.push(`🛒 <a href="${link}">Buy Now on Amazon</a>`);
+  lines.push(`${meta.emoji} <a href="${link}">Buy Now on ${meta.label}</a>`);
   lines.push('');
-  lines.push(`📢 <a href="https://t.me/+NJWXP0z-Sb00YThl">Daily Amazon Deals Channel</a>`);
+  lines.push(`📢 <a href="https://t.me/+NJWXP0z-Sb00YThl">Daily Deals Channel</a>`);
 
   return lines.join('\n');
 }
@@ -103,30 +118,43 @@ function escapeHtml(text) {
 /**
  * Send a deal to Telegram — photo + caption if image available, text-only fallback.
  */
-async function sendToTelegram(imageUrl, caption) {
+/**
+ * Send a deal to Telegram — photo + caption + inline Buy Now button.
+ * Falls back to text-only if image send fails.
+ *
+ * @param {string} imageUrl
+ * @param {string} caption      HTML-formatted caption
+ * @param {string} buyLink      Link for the inline button (optional)
+ */
+async function sendToTelegram(imageUrl, caption, buyLink = null) {
   if (!bot || !CHAT_ID) {
     logger.warn('Telegram not configured — skipping post');
     return null;
   }
 
-  // Try sending with image
+  const replyMarkup = buyLink
+    ? { inline_keyboard: [[{ text: '🛒 Buy Now', url: buyLink }]] }
+    : undefined;
+
   if (imageUrl) {
     try {
       const result = await bot.sendPhoto(CHAT_ID, imageUrl, {
         caption,
-        parse_mode: 'HTML',
+        parse_mode:   'HTML',
+        reply_markup: replyMarkup,
       });
       logger.info('Deal sent to Telegram (with image)');
       return result;
     } catch (error) {
-      // Image send failed (bad URL, size limit, etc.) — fall through to text-only
       logger.warn(`Image send failed: ${error.message} — falling back to text`);
     }
   }
 
-  // Text-only fallback
   try {
-    const result = await bot.sendMessage(CHAT_ID, caption, { parse_mode: 'HTML' });
+    const result = await bot.sendMessage(CHAT_ID, caption, {
+      parse_mode:   'HTML',
+      reply_markup: replyMarkup,
+    });
     logger.info('Deal sent to Telegram (text-only)');
     return result;
   } catch (error) {
@@ -137,21 +165,31 @@ async function sendToTelegram(imageUrl, caption) {
 
 /**
  * Send an arbitrary text message to Telegram (custom message feature).
+ * @param {string} message
+ * @param {{ parse_mode?: 'Markdown'|'HTML' }} [opts]
  */
-async function sendMessageToTelegram(message) {
+async function sendMessageToTelegram(message, opts = {}) {
   if (!bot || !CHAT_ID) {
     logger.warn('Telegram not configured — skipping message');
     return null;
   }
 
   try {
-    const result = await bot.sendMessage(CHAT_ID, message);
+    const result = await bot.sendMessage(CHAT_ID, message, opts);
     logger.info('Custom message sent to Telegram');
     return result;
   } catch (error) {
     logger.error(`Telegram message failed: ${error.message}`);
     throw error;
   }
+}
+
+/**
+ * Send a Markdown-formatted system alert to Telegram.
+ * Used internally for EarnKaro session alerts.
+ */
+async function sendAlert(message) {
+  return sendMessageToTelegram(message, { parse_mode: 'Markdown' });
 }
 
 /**
@@ -173,6 +211,7 @@ async function sendTestMessage() {
 module.exports = {
   sendToTelegram,
   sendMessageToTelegram,
+  sendAlert,
   formatDealText,
   sendTestMessage,
 };

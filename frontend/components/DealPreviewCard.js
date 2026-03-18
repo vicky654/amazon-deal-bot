@@ -1,6 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
+
+const ReelModal = dynamic(() => import('./reels/ReelModal'), { ssr: false });
 
 /**
  * Props:
@@ -9,12 +12,19 @@ import { useState } from 'react';
  *   telegramLoading: boolean
  */
 export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading }) {
-  const [imgError, setImgError] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [imgError,            setImgError]            = useState(false);
+  const [copied,              setCopied]              = useState(false);
   const [showTelegramPreview, setShowTelegramPreview] = useState(true);
+  const [reelOpen,            setReelOpen]            = useState(false);
 
-  const formattedPrice = deal.price ? `₹${deal.price.toLocaleString('en-IN')}` : 'N/A';
+  // `discount` = percentage off; `savings` = rupees saved (model has both)
+  const discountPct = deal.discount ?? deal.savings;
+
+  const formattedPrice    = deal.price         ? `₹${deal.price.toLocaleString('en-IN')}`         : 'N/A';
   const formattedOriginal = deal.originalPrice ? `₹${deal.originalPrice.toLocaleString('en-IN')}` : null;
+  const rupeeSaved        = (deal.originalPrice && deal.price)
+    ? (deal.originalPrice - deal.price).toLocaleString('en-IN')
+    : null;
 
   async function copyLink() {
     try {
@@ -45,9 +55,9 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
       <div className="bg-gradient-to-r from-orange-500 to-orange-400 px-5 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-white font-semibold text-sm">Deal Preview</span>
-          {deal.savings != null && (
+          {discountPct != null && (
             <span className="bg-white text-orange-600 text-xs font-bold px-2 py-0.5 rounded-full">
-              {deal.savings}% OFF
+              {discountPct}% OFF
             </span>
           )}
         </div>
@@ -98,9 +108,9 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
                 <span className="text-base text-slate-400 line-through">{formattedOriginal}</span>
               )}
 
-              {deal.savings != null ? (
+              {discountPct != null ? (
                 <span className="bg-green-100 text-green-700 text-sm font-bold px-2.5 py-0.5 rounded-full">
-                  {deal.savings}% off
+                  {discountPct}% off
                 </span>
               ) : (
                 <span className="bg-slate-100 text-slate-500 text-xs px-2 py-0.5 rounded-full">
@@ -111,16 +121,12 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
 
             {/* Stats chips */}
             <div className="flex flex-wrap gap-2">
-              {deal.savings != null && (
+              {rupeeSaved && (
                 <div className="flex items-center gap-1.5 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">
                   <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                   </svg>
-                  <span className="text-xs font-semibold text-green-700">
-                    Saving ₹{deal.originalPrice && deal.price
-                      ? (deal.originalPrice - deal.price).toLocaleString('en-IN')
-                      : 'N/A'}
-                  </span>
+                  <span className="text-xs font-semibold text-green-700">Saving ₹{rupeeSaved}</span>
                 </div>
               )}
 
@@ -193,33 +199,56 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
               )}
             </div>
 
-            {/* Post to Telegram button */}
-            <button
-              onClick={onPostTelegram}
-              disabled={telegramLoading}
-              className={`w-full py-3 px-4 rounded-xl text-sm font-semibold text-white
-                flex items-center justify-center gap-2 transition-all duration-200
-                ${telegramLoading
-                  ? 'bg-slate-300 cursor-not-allowed'
-                  : 'bg-blue-500 hover:bg-blue-600 shadow-md shadow-blue-500/30 hover:shadow-blue-500/40 active:scale-[0.99]'}`}
-            >
-              {telegramLoading ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            {/* Action buttons */}
+            <div className="flex flex-col gap-2">
+              {/* Post to Telegram */}
+              <button
+                onClick={onPostTelegram}
+                disabled={telegramLoading}
+                className={`w-full py-3 px-4 rounded-xl text-sm font-semibold text-white
+                  flex items-center justify-center gap-2 transition-all duration-200
+                  ${telegramLoading
+                    ? 'bg-slate-300 cursor-not-allowed'
+                    : 'bg-blue-500 hover:bg-blue-600 shadow-md shadow-blue-500/30 hover:shadow-blue-500/40 active:scale-[0.99]'}`}
+              >
+                {telegramLoading ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Posting to Telegram...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                    </svg>
+                    Post to Telegram
+                  </>
+                )}
+              </button>
+
+              {/* Create Instagram Reel */}
+              {deal._id && (
+                <button
+                  onClick={() => setReelOpen(true)}
+                  className="w-full py-3 px-4 rounded-xl text-sm font-semibold text-white
+                    flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+                  style={{ background: 'linear-gradient(135deg,#7c3aed,#ec4899)', boxShadow: '0 4px 14px rgba(124,58,237,0.25)' }}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                   </svg>
-                  Posting to Telegram...
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-                  </svg>
-                  Post to Telegram
-                </>
+                  Create Instagram Reel
+                </button>
               )}
-            </button>
+            </div>
+
+            {reelOpen && (
+              <ReelModal deal={deal} onClose={() => setReelOpen(false)} />
+            )}
           </div>
         </div>
       </div>
