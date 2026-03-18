@@ -5,7 +5,7 @@
  * Base URL is controlled by NEXT_PUBLIC_API_URL env var.
  */
 
-const BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+const BASE = (process.env.NEXT_PUBLIC_API_URL || 'https://deal-system-backend.onrender.com').replace(/\/$/, '');
 
 class ApiError extends Error {
   constructor(message, status, body) {

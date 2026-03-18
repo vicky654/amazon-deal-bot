@@ -425,7 +425,7 @@ export default function ReelModal({ deal, onClose }) {
 
   const toastTimer = useRef(null);
 
-  const BASE         = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+  const BASE         = (process.env.NEXT_PUBLIC_API_URL || 'https://deal-system-backend.onrender.com').replace(/\/$/, '');
   const fullVideoUrl = videoUrl ? `${BASE}${videoUrl}` : null;
 
   // Escape key + scroll lock
