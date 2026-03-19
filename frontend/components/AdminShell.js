@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Menu, X, LogOut } from 'lucide-react';
 
-import Sidebar  from './Sidebar';
+import Sidebar   from './Sidebar';
 import BottomNav from './BottomNav';
 import { removeToken } from '../lib/auth';
 
@@ -19,12 +19,31 @@ export default function AdminShell({ children }) {
   }
 
   return (
-    <div className="min-h-screen flex bg-slate-50 overflow-hidden">
+    /*
+     * ROOT:  h-screen + overflow-hidden
+     *   → Pins the entire shell to exactly the viewport height.
+     *   → `min-h-screen` would let the container grow taller than the viewport,
+     *     which breaks independent-scroll isolation between sidebar and content.
+     *   → overflow-hidden prevents any document-level scroll (both axes).
+     */
+    <div className="h-screen flex overflow-hidden bg-slate-50">
+
+      {/* ── Sidebar ── */}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-20 bg-white/70 backdrop-blur border-b border-slate-200">
-          <div className="max-w-7xl w-full mx-auto px-4 py-3 flex items-center justify-between gap-4">
+      {/*
+       * MAIN COLUMN:  flex-1 flex flex-col min-w-0 min-h-0
+       *   min-w-0  → allows flex child to shrink below its content width (prevents
+       *              sidebar pushing the right column off-screen)
+       *   min-h-0  → allows flex child to shrink below its content height (critical
+       *              in a flex column so children can scroll independently)
+       *   overflow-hidden → clips the column; actual scroll is on <main> below
+       */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+
+        {/* ── Sticky header ── */}
+        <header className="shrink-0 sticky top-0 z-20 bg-white/80 backdrop-blur-sm border-b border-slate-200">
+          <div className="w-full max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -52,7 +71,6 @@ export default function AdminShell({ children }) {
                 </Link>
               </div>
 
-              {/* Logout button */}
               <button
                 onClick={handleLogout}
                 title="Logout"
@@ -65,13 +83,21 @@ export default function AdminShell({ children }) {
           </div>
         </header>
 
-        {/* pb-16 reserves space for the mobile bottom nav bar */}
-        <main className="flex-1 overflow-y-auto w-full [-webkit-overflow-scrolling:touch] pb-16 lg:pb-0">
-          <div className="mx-auto w-full max-w-7xl px-3 sm:px-4 py-4 sm:py-6">{children}</div>
+        {/*
+         * SCROLLABLE CONTENT AREA:
+         *   flex-1  → fills remaining vertical space below header
+         *   overflow-y-auto → vertical scroll ONLY here (not on body)
+         *   overflow-x-hidden → hard-clips any content wider than the column
+         *   pb-16 lg:pb-0 → clearance for mobile BottomNav
+         */}
+        <main className="flex-1 overflow-y-auto overflow-x-hidden [-webkit-overflow-scrolling:touch] pb-16 lg:pb-0">
+          <div className="w-full max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+            {children}
+          </div>
         </main>
       </div>
 
-      {/* Mobile bottom navigation — hidden on lg+ */}
+      {/* Mobile bottom nav — fixed, lg:hidden */}
       <BottomNav />
     </div>
   );

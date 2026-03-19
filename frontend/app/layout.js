@@ -7,8 +7,13 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
-      <body className="antialiased">{children}</body>
+    /*
+     * h-full on html + body lets AdminShell's h-screen take effect correctly.
+     * Without this, percentage-based heights inside the shell may not resolve
+     * to a definite pixel value in some browsers.
+     */
+    <html lang="en" className="h-full">
+      <body className="h-full antialiased">{children}</body>
     </html>
   );
 }

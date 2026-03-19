@@ -48,21 +48,59 @@ const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/5 * * * *'; // every 5 min
 const app = express();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-// Allow ALLOWED_ORIGINS env var (comma-separated) for strict whitelisting.
-// Falls back to open CORS for backward compatibility.
+//
+// ALLOWED_ORIGINS env var (comma-separated) controls which origins are allowed.
+// Supports:
+//   • Exact match:    https://myapp.vercel.app
+//   • Wildcard TLD:   *.vercel.app  (all Vercel preview deploys)
+//
+// Without ALLOWED_ORIGINS the backend falls back to open CORS (origin: '*'),
+// which works fine for local dev but disallows credentials.
+//
+// For production on Render, set:
+//   ALLOWED_ORIGINS=https://your-app.vercel.app,https://your-custom-domain.com
+
+const CORS_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
+const CORS_HEADERS = ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'];
+
 const rawOrigins = process.env.ALLOWED_ORIGINS;
+
+function originAllowed(origin, allowList) {
+  // Server-to-server (no Origin header) → always allow
+  if (!origin) return true;
+  return allowList.some((allowed) => {
+    if (allowed === '*') return true;
+    // Wildcard subdomain: *.vercel.app
+    if (allowed.startsWith('*.')) {
+      const suffix = allowed.slice(1); // e.g. ".vercel.app"
+      return origin.endsWith(suffix);
+    }
+    return origin === allowed;
+  });
+}
+
 const corsOptions = rawOrigins
   ? {
       origin(origin, callback) {
-        const list = rawOrigins.split(',').map((o) => o.trim());
-        // Allow same-origin (non-browser) or whitelisted origins
-        if (!origin || list.includes(origin)) return callback(null, true);
+        const list = rawOrigins.split(',').map((o) => o.trim()).filter(Boolean);
+        if (originAllowed(origin, list)) return callback(null, true);
+        logger.warn(`[CORS] Blocked origin: ${origin}`);
         callback(new Error(`CORS: origin "${origin}" not allowed`));
       },
-      credentials: true,
+      credentials:    true,
+      methods:        CORS_METHODS,
+      allowedHeaders: CORS_HEADERS,
     }
-  : { origin: '*' };
+  : {
+      // Open CORS for local dev — credentials must be false with origin: '*'
+      origin:         '*',
+      methods:        CORS_METHODS,
+      allowedHeaders: CORS_HEADERS,
+    };
 
+// Handle preflight (OPTIONS) for ALL routes before any other middleware.
+// This is required for non-simple requests (e.g. those with Authorization header).
+app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));
 

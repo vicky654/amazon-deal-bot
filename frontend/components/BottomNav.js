@@ -22,7 +22,8 @@ export default function BottomNav() {
 
   return (
     // Only visible on mobile (lg:hidden), sits above system chrome
-    <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-200 safe-area-inset-bottom">
+    <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-200 safe-bottom">
+      {/* h-16 for tap targets + env(safe-area-inset-bottom) for iPhone home bar */}
       <div className="flex items-stretch h-16">
         {NAV.map(({ href, icon, label }) => {
           const active = isActive(href);
