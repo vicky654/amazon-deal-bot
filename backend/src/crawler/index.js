@@ -22,6 +22,7 @@ const Deal                           = require('../models/Deal');
 const CrawlerRun                     = require('../models/CrawlerRun');
 const telegram                       = require('../../telegram');
 const logger                         = require('../../utils/logger');
+const autoMode                       = require('../autoMode');
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function categoryDelay() {
@@ -202,14 +203,32 @@ async function processProduct(url, platform, stats) {
     // Save to DB
     const deal = await upsertDeal(product, platform, dealType, reason);
 
-    // Post to Telegram (only once per deal)
-    if (!deal.posted) {
-      await postDealToTelegram(deal);
-
-      await Deal.findByIdAndUpdate(deal._id, { posted: true, postedAt: new Date() });
-      stats.dealsPosted++;
-      metrics.increment(`deals.${platform}.posted`);
-      logger.info(`Posted: "${deal.title.slice(0, 50)}"`);
+    // Post to Telegram — only when Auto Mode is ON, deal is unposted, and score meets threshold
+    const MIN_SCORE = parseInt(process.env.MIN_DEAL_SCORE || '30', 10);
+    const scoreMet  = (deal.score || 0) >= MIN_SCORE;
+    if (!deal.posted && autoMode.state.enabled && scoreMet) {
+      try {
+        await postDealToTelegram(deal);
+        await Deal.findByIdAndUpdate(deal._id, {
+          posted:   true,
+          postedAt: new Date(),
+          'steps.telegram.done': true,
+          'steps.telegram.at':   new Date(),
+        });
+        stats.dealsPosted++;
+        metrics.increment(`deals.${platform}.posted`);
+        logger.info(`Posted: "${deal.title.slice(0, 50)}"`);
+      } catch (tgErr) {
+        logger.error(`Telegram post failed for ${deal._id}: ${tgErr.message}`);
+        await Deal.findByIdAndUpdate(deal._id, {
+          'steps.telegram.done':  false,
+          'steps.telegram.error': tgErr.message,
+        }).catch(() => {});
+      }
+    } else if (!autoMode.state.enabled) {
+      logger.info(`Auto Mode OFF — deal saved but NOT posted: ${deal.asin || deal._id}`);
+    } else if (!scoreMet) {
+      logger.info(`Score too low (${deal.score}/${MIN_SCORE}) — saved but NOT posted: ${deal.asin || deal._id}`);
     } else {
       logger.info(`Already posted: ${deal.asin || deal._id} — skipping Telegram`);
     }

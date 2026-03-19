@@ -4,21 +4,22 @@ import { useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 
 import DealGeneratorForm from '../../../components/DealGeneratorForm';
-import DealPreviewCard from '../../../components/DealPreviewCard';
-import LoadingSkeleton from '../../../components/LoadingSkeleton';
-import Toast from '../../../components/Toast';
+import DealPreviewCard   from '../../../components/DealPreviewCard';
+import LoadingSkeleton   from '../../../components/LoadingSkeleton';
+import Toast             from '../../../components/Toast';
 import { dealsApi, telegramApi } from '../../../lib/api';
 
-// Lazy-load modal — keeps initial bundle tight
 const ReelModal = dynamic(() => import('../../../components/reels/ReelModal'), { ssr: false });
 
 export default function GeneratePage() {
-  const [deal,           setDeal]           = useState(null);
-  const [generating,     setGenerating]     = useState(false);
-  const [telegramLoading,setTelegramLoading]= useState(false);
-  const [reelOpen,       setReelOpen]       = useState(false);
-  const [toast,          setToast]          = useState(null);
-  const toastId = useRef(0);
+  const [deal,            setDeal]            = useState(null);
+  const [generating,      setGenerating]      = useState(false);
+  const [generateError,   setGenerateError]   = useState(null);
+  const [telegramLoading, setTelegramLoading] = useState(false);
+  const [reelOpen,        setReelOpen]        = useState(false);
+  const [toast,           setToast]           = useState(null);
+  const toastId   = useRef(0);
+  const previewRef = useRef(null);
 
   function showToast(type, message) {
     toastId.current += 1;
@@ -28,15 +29,19 @@ export default function GeneratePage() {
   async function handleGenerate(url) {
     setGenerating(true);
     setDeal(null);
+    setGenerateError(null);
     setReelOpen(false);
     try {
-      const res = await dealsApi.generate(url);
-      // Backend returns { success, deal, shouldPost, reason } — extract deal
+      const res      = await dealsApi.generate(url);
       const dealData = res.deal || res;
       setDeal(dealData);
       showToast('success', 'Deal scraped successfully!');
+      // Scroll to preview on mobile after a short tick
+      setTimeout(() => previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
     } catch (err) {
-      showToast('error', err.message || 'Failed to generate deal. Check the URL and try again.');
+      const msg = err.message || 'Failed to generate deal. Check the URL and try again.';
+      setGenerateError(msg);
+      showToast('error', msg);
     } finally {
       setGenerating(false);
     }
@@ -64,29 +69,37 @@ export default function GeneratePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* ── Page header ── */}
       <header className="space-y-1">
-        <h1 className="text-2xl font-bold text-slate-900">Generate Deal</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Generate Deal</h1>
         <p className="text-sm text-slate-500">
-          Paste a product URL to scrape deal data, post to Telegram, and generate an Instagram Reel.
+          Paste any Amazon URL or short link — price, discount, and affiliate link extracted automatically.
         </p>
       </header>
 
-      <DealGeneratorForm onGenerate={handleGenerate} loading={generating} />
+      {/* ── Generator form ── */}
+      <DealGeneratorForm
+        onGenerate={handleGenerate}
+        loading={generating}
+        error={generateError}
+      />
 
+      {/* ── Loading skeleton ── */}
       {generating && <LoadingSkeleton />}
 
+      {/* ── Deal preview ── */}
       {!generating && deal && (
-        <>
+        <div ref={previewRef} className="space-y-4">
           <DealPreviewCard
             deal={deal}
             onPostTelegram={handlePostTelegram}
             telegramLoading={telegramLoading}
           />
 
-          {/* Instagram Reel CTA */}
+          {/* Reel CTA */}
           {deal._id && (
-            <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-violet-50 to-pink-50 border border-violet-200 rounded-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-5 py-4 bg-gradient-to-r from-violet-50 to-pink-50 border border-violet-200 rounded-2xl">
               <div className="flex items-center gap-3">
                 <div
                   className="h-10 w-10 rounded-xl flex items-center justify-center text-lg shrink-0"
@@ -101,7 +114,7 @@ export default function GeneratePage() {
               </div>
               <button
                 onClick={() => setReelOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl transition-all active:scale-[0.97]"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white rounded-xl transition-all active:scale-[0.97] touch-manipulation"
                 style={{ background: 'linear-gradient(135deg,#7c3aed,#ec4899)', boxShadow: '0 4px 14px rgba(124,58,237,0.30)' }}
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -112,7 +125,7 @@ export default function GeneratePage() {
               </button>
             </div>
           )}
-        </>
+        </div>
       )}
 
       {reelOpen && deal && (

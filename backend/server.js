@@ -14,6 +14,10 @@ const healthRouter        = require('./src/routes/health');
 const earnkaroRouter      = require('./src/routes/earnkaro');
 const reelsRouter         = require('./src/routes/reels');
 const systemRouter        = require('./src/routes/system');
+const redirectRouter      = require('./src/routes/redirect');
+const authRouter          = require('./src/routes/auth');
+const dashboardRouter     = require('./src/routes/dashboard');
+const verifyToken         = require('./src/middleware/auth');
 const { closeBrowser }    = require('./src/scraper/browser');
 const { getQueueStats }   = require('./src/queue');
 const earnkaroAutoRefresh = require('./src/services/earnkaroAutoRefresh');
@@ -118,7 +122,10 @@ cron.schedule(CRON_SCHEDULE, async () => {
  */
 
 // Multi-platform REST API
-app.use('/api/deals',    dealsRouter);
+app.use('/r',             redirectRouter);     // click tracking redirects
+app.use('/api/auth',      authRouter);         // login + token verify
+app.use('/api/dashboard', verifyToken, dashboardRouter); // protected dashboard
+app.use('/api/deals',     dealsRouter);
 app.use('/api/crawler',  crawlerRouter);
 app.use('/api/earnkaro', earnkaroRouter);
 app.use('/api/reels',    reelsRouter);

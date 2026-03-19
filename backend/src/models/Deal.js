@@ -43,8 +43,20 @@ const dealSchema = new mongoose.Schema(
       default: 'discount',
     },
     filterReason: { type: String },
+    score:        { type: Number, default: 0 },   // 0-100 deal score
+
+    // ── Pipeline step tracking ──────────────────────────────────────────────
+    steps: {
+      scrape:    { done: { type: Boolean, default: false }, at: Date, error: String },
+      filter:    { done: { type: Boolean, default: false }, at: Date, reason: String },
+      affiliate: { done: { type: Boolean, default: false }, at: Date, error: String },
+      telegram:  { done: { type: Boolean, default: false }, at: Date, error: String },
+    },
+
+    clicks:       { type: Number, default: 0 },       // affiliate link click count
     posted:       { type: Boolean, default: false, index: true },
     postedAt:     { type: Date },
+    scheduledFor: { type: Date, default: null },   // null = post immediately
     priceHistory: {
       type:    [priceEntrySchema],
       default: [],

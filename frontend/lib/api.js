@@ -7,6 +7,8 @@
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || 'https://deal-system-backend.onrender.com').replace(/\/$/, '');
 
+
+console.log(`API base URL: ${process.env.NEXT_PUBLIC_API_URL}`);
 class ApiError extends Error {
   constructor(message, status, body) {
     super(message);
@@ -17,9 +19,14 @@ class ApiError extends Error {
 }
 
 async function request(path, options = {}) {
-  const url = `${BASE}${path}`;
-  const res  = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+  const url   = `${BASE}${path}`;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('dealbot_token') : null;
+  const res   = await fetch(url, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
     ...options,
   });
 
@@ -34,12 +41,16 @@ async function request(path, options = {}) {
 // ── Deals ─────────────────────────────────────────────────────────────────────
 
 export const dealsApi = {
-  /** @param {{ limit?: number, platform?: string, posted?: boolean }} params */
+  /** @param {{ limit?: number, platform?: string, posted?: boolean, sort?: string }} params */
   list(params = {}) {
     const qs = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)])
     ).toString();
     return request(`/api/deals${qs ? `?${qs}` : ''}`);
+  },
+
+  analytics() {
+    return request('/api/deals/analytics');
   },
 
   get(id) {
@@ -194,11 +205,46 @@ export const healthApi = {
 // ── System ────────────────────────────────────────────────────────────────────
 
 export const systemApi = {
-  /** Live cron status: running, lastRun, nextRun, logs[] */
-  cronStatus() { return request('/api/system/cron-status'); },
-
-  /** Telegram config diagnostics (no secrets exposed) */
+  cronStatus()    { return request('/api/system/cron-status'); },
   telegramDebug() { return request('/api/system/telegram-debug'); },
+  health()        { return request('/api/system/health'); },
+
+  testTelegram()     { return request('/api/system/test/telegram',  { method: 'POST' }); },
+  testCron()         { return request('/api/system/test/cron',      { method: 'POST' }); },
+  testAffiliate()    { return request('/api/system/test/affiliate', { method: 'POST' }); },
+  testScraper()      { return request('/api/system/test/scraper',   { method: 'POST' }); },
+  testEarnkaro(url)  {
+    return request('/api/system/test/earnkaro', {
+      method: 'POST',
+      body:   JSON.stringify({ url }),
+    });
+  },
+
+  // Auto Mode
+  getAutoMode()             { return request('/api/system/auto-mode'); },
+  setAutoMode(enabled)      { return request('/api/system/auto-mode', { method: 'POST', body: JSON.stringify({ enabled }) }); },
+
+  // Per-deal retry
+  retryTelegram(dealId)     { return request(`/api/system/retry/${dealId}/telegram`,  { method: 'POST' }); },
+  retryAffiliate(dealId)    { return request(`/api/system/retry/${dealId}/affiliate`, { method: 'POST' }); },
+};
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+export const authApi = {
+  login(email, password) {
+    return request('/api/auth/login', {
+      method: 'POST',
+      body:   JSON.stringify({ email, password }),
+    });
+  },
+  me() { return request('/api/auth/me'); },
+};
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+
+export const dashboardApi = {
+  get() { return request('/api/dashboard'); },
 };
 
 export { ApiError };

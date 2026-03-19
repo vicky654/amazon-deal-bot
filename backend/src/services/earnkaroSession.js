@@ -79,6 +79,28 @@ const _RUNTIME_KEY = crypto.randomBytes(32);
 let   _encryptedCreds = null;   // { iv, data, tag } — all hex strings
 let   _loginLock      = false;  // Prevent parallel Puppeteer logins
 
+// ── In-Memory Session Status Cache ───────────────────────────────────────────
+// Lightweight synchronous status for dashboard health checks (no DB query).
+
+let _statusCache = { connected: false, healthScore: 0, updatedAt: null };
+
+function _updateStatusCache(connected, healthScore = 0) {
+  _statusCache = { connected, healthScore, updatedAt: new Date().toISOString() };
+}
+
+/**
+ * Synchronous session status snapshot — no DB query, suitable for health endpoints.
+ * Updated whenever saveSession / markSessionStatus runs.
+ */
+function getSessionStatus() {
+  return {
+    connected:      _statusCache.connected,
+    healthScore:    _statusCache.healthScore,
+    updatedAt:      _statusCache.updatedAt,
+    hasCredentials: hasCredentials(),
+  };
+}
+
 function _encrypt(obj) {
   const iv     = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-256-gcm', _RUNTIME_KEY, iv);
@@ -162,6 +184,7 @@ function clearCredentials() { _encryptedCreds = null; }
 // ── Cookie Persistence ────────────────────────────────────────────────────────
 
 async function saveSession(cookies, email, loginMethod = 'auto') {
+  _updateStatusCache(true, 100);   // Mark connected immediately (optimistic)
   await EarnKaroSession.deleteMany({});
   const session = await EarnKaroSession.create({
     cookies,
@@ -253,6 +276,8 @@ function _buildHealth({ ageHours, loginMethod, lastValidated, validationStatus, 
 }
 
 async function markSessionStatus(status) {
+  if (status === 'expired') _updateStatusCache(false, 0);
+  else if (status === 'healthy') _updateStatusCache(true, 100);
   try {
     await EarnKaroSession.findOneAndUpdate(
       {},
@@ -399,6 +424,7 @@ module.exports = {
 
   // Health + status
   getHealth,
+  getSessionStatus,
   markSessionStatus,
 
   // Logging

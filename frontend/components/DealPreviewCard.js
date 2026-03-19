@@ -1,9 +1,76 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { systemApi } from '../lib/api';
 
 const ReelModal = dynamic(() => import('./reels/ReelModal'), { ssr: false });
+
+// ── Deal score badge ──────────────────────────────────────────────────────────
+
+function ScoreBadge({ score }) {
+  if (score == null) return null;
+  const tier =
+    score >= 75 ? { label: '🔥 Hot',    cls: 'bg-red-100 text-red-700 border-red-200' } :
+    score >= 55 ? { label: '✅ Good',    cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' } :
+    score >= 35 ? { label: '👍 Decent',  cls: 'bg-blue-100 text-blue-700 border-blue-200' } :
+                  { label: '💤 Weak',    cls: 'bg-gray-100 text-gray-500 border-gray-200' };
+  return (
+    <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${tier.cls}`}>
+      {tier.label} <span className="opacity-70">({score})</span>
+    </span>
+  );
+}
+
+// ── Pipeline step row ─────────────────────────────────────────────────────────
+
+function PipelineSteps({ deal, onRetry }) {
+  const steps = deal.steps;
+  if (!steps) return null;
+
+  const PIPELINE = [
+    { key: 'scrape',    label: 'Scrape',    icon: '🕷️' },
+    { key: 'filter',    label: 'Filter',    icon: '🔍' },
+    { key: 'affiliate', label: 'Affiliate', icon: '🔗', retryable: true },
+    { key: 'telegram',  label: 'Telegram',  icon: '📨', retryable: true },
+  ];
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Pipeline</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {PIPELINE.map(({ key, label, icon, retryable }) => {
+          const step = steps[key];
+          const done = step?.done;
+          const err  = step?.error;
+          return (
+            <div key={key} className={`rounded-xl border p-2.5 text-center transition-all ${
+              done ? 'bg-emerald-50 border-emerald-200' :
+              err  ? 'bg-red-50 border-red-200' :
+                     'bg-gray-50 border-gray-200'
+            }`}>
+              <div className="text-base mb-1">{icon}</div>
+              <p className="text-[10px] font-semibold text-gray-700">{label}</p>
+              <p className={`text-[10px] font-bold mt-0.5 ${
+                done ? 'text-emerald-600' : err ? 'text-red-600' : 'text-gray-400'
+              }`}>
+                {done ? '✓ Done' : err ? '✗ Failed' : '– Pending'}
+              </p>
+              {err && retryable && (
+                <button
+                  onClick={() => onRetry(key)}
+                  className="mt-1.5 text-[9px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700 hover:bg-red-200 transition-colors touch-manipulation"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Props:
@@ -16,6 +83,22 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
   const [copied,              setCopied]              = useState(false);
   const [showTelegramPreview, setShowTelegramPreview] = useState(true);
   const [reelOpen,            setReelOpen]            = useState(false);
+  const [retrying,            setRetrying]            = useState(null);   // 'telegram' | 'affiliate' | null
+  const [retryResult,         setRetryResult]         = useState(null);
+
+  const handleRetry = useCallback(async (step) => {
+    setRetrying(step);
+    setRetryResult(null);
+    try {
+      const fn = step === 'telegram' ? systemApi.retryTelegram : systemApi.retryAffiliate;
+      const res = await fn(deal._id);
+      setRetryResult({ ok: res.ok, step, error: res.error });
+    } catch (e) {
+      setRetryResult({ ok: false, step, error: e.message });
+    } finally {
+      setRetrying(null);
+    }
+  }, [deal._id]);
 
   // `discount` = percentage off; `savings` = rupees saved (model has both)
   const discountPct = deal.discount ?? deal.savings;
@@ -53,13 +136,14 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       {/* Deal header bar */}
       <div className="bg-gradient-to-r from-orange-500 to-orange-400 px-4 sm:px-5 py-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <span className="text-white font-semibold text-sm">Deal Preview</span>
           {discountPct != null && (
             <span className="bg-white text-orange-600 text-xs font-bold px-2 py-0.5 rounded-full">
               {discountPct}% OFF
             </span>
           )}
+          <ScoreBadge score={deal.score} />
         </div>
         {deal.asin && (
           <span className="text-orange-100 text-xs font-mono truncate max-w-[120px] sm:max-w-none">
@@ -140,7 +224,36 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
                   <span className="text-xs font-mono text-slate-500">{deal.asin}</span>
                 </div>
               )}
+
+              {deal.clicks > 0 && (
+                <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">
+                  <svg className="w-3.5 h-3.5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5" />
+                  </svg>
+                  <span className="text-xs font-semibold text-orange-700">{deal.clicks} click{deal.clicks !== 1 ? 's' : ''}</span>
+                </div>
+              )}
             </div>
+
+            {/* Pipeline steps */}
+            <PipelineSteps deal={deal} onRetry={handleRetry} />
+
+            {/* Retry result banner */}
+            {retryResult && (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium border ${
+                retryResult.ok
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                  : 'bg-red-50 border-red-200 text-red-700'
+              }`}>
+                <span>{retryResult.ok ? '✅' : '❌'}</span>
+                <span>
+                  {retryResult.ok
+                    ? `${retryResult.step} retry succeeded`
+                    : `Retry failed: ${retryResult.error}`}
+                </span>
+                <button onClick={() => setRetryResult(null)} className="ml-auto opacity-50 hover:opacity-80 touch-manipulation">✕</button>
+              </div>
+            )}
 
             {/* Affiliate link */}
             <div className="flex items-center gap-2">
@@ -206,10 +319,10 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
               {/* Post to Telegram */}
               <button
                 onClick={onPostTelegram}
-                disabled={telegramLoading}
+                disabled={telegramLoading || retrying === 'telegram'}
                 className={`w-full py-3 px-4 rounded-xl text-sm font-semibold text-white
-                  flex items-center justify-center gap-2 transition-all duration-200
-                  ${telegramLoading
+                  flex items-center justify-center gap-2 transition-all duration-200 touch-manipulation
+                  ${telegramLoading || retrying === 'telegram'
                     ? 'bg-slate-300 cursor-not-allowed'
                     : 'bg-blue-500 hover:bg-blue-600 shadow-md shadow-blue-500/30 hover:shadow-blue-500/40 active:scale-[0.99]'}`}
               >

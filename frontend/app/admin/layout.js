@@ -1,9 +1,9 @@
-import AdminShell from '../../components/AdminShell';
+import AuthGuard from '../../components/AuthGuard';
 
 export const metadata = {
   title: 'Admin — DealBot',
 };
 
 export default function AdminLayout({ children }) {
-  return <AdminShell>{children}</AdminShell>;
+  return <AuthGuard>{children}</AuthGuard>;
 }

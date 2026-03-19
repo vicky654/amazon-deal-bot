@@ -13,15 +13,24 @@ import {
   ListChecks,
   Video,
   Cpu,
+  MousePointerClick,
+  LayoutDashboard,
+  Bug,
 } from 'lucide-react';
 
 const MENU = [
+  {
+    section: 'Overview',
+    items: [
+      { label: 'Dashboard',         href: '/admin',          icon: LayoutDashboard },
+    ],
+  },
   {
     section: 'Tools',
     items: [
       { label: 'Generate Deal',     href: '/admin/generate', icon: Plus    },
       { label: 'Recent Deals',      href: '/admin/deals',    icon: Package },
-      { label: 'Instagram Reels',   href: '/admin/deals',    icon: Video,  badge: 'New' },
+      // { label: 'Instagram Reels',   href: '/admin/deals',    icon: Video,  badge: 'New' },
       { label: 'Crawler Status',    href: '/admin/crawler',  icon: Activity },
       { label: 'Custom Message',    href: '/admin/message',  icon: MessageSquare },
     ],
@@ -29,14 +38,17 @@ const MENU = [
   {
     section: 'Affiliate',
     items: [
-      { label: 'EarnKaro Settings', href: '/admin/settings', icon: Wallet },
+      { label: 'EarnKaro Settings', href: '/admin/settings',       icon: Wallet },
       { label: 'Affiliate History', href: '/admin/affiliate-history', icon: ListChecks },
+      { label: 'EarnKaro Debug',    href: '/admin/earnkaro-debug', icon: Bug, badge: 'New' },
+      { label: 'Analytics',         href: '/admin/analytics',      icon: MousePointerClick },
     ],
   },
   {
     section: 'System',
     items: [
       { label: 'Cron Monitor',   href: '/admin/system',      icon: Cpu,      badge: 'Live' },
+      { label: 'Testing Panel',  href: '/admin/testing',     icon: ListChecks, badge: 'New' },
       { label: 'How It Works',   href: '/admin/how-it-works', icon: Info },
       { label: 'System Metrics', href: '/admin/metrics',      icon: BarChart2 },
     ],
@@ -47,7 +59,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
   const pathname = usePathname();
 
   function isActive(href) {
-    if (href === '/') return pathname === '/';
+    if (href === '/admin') return pathname === '/admin';
     return pathname === href || pathname?.startsWith(`${href}/`);
   }
 

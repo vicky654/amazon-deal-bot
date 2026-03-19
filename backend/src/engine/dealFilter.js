@@ -12,6 +12,7 @@
 
 const Deal   = require('../models/Deal');
 const logger = require('../../utils/logger');
+const { scoreDeal } = require('./dealScorer');
 
 const THRESHOLDS = {
   amazon:   { discount: parseInt(process.env.AMAZON_MIN_DISCOUNT   || '40', 10), priceDrop: parseInt(process.env.AMAZON_PRICE_DROP   || '30', 10) },
@@ -116,6 +117,8 @@ async function upsertDeal(product, category, dealType, reason) {
     return saved;
   }
 
+  const score = scoreDeal({ platform, price, originalPrice, discount }, dealType);
+
   const created = await Deal.create({
     platform,
     asin:          asin || `${platform}_${Date.now()}`,
@@ -129,8 +132,15 @@ async function upsertDeal(product, category, dealType, reason) {
     category:      category || platform,
     dealType:      dealType || 'discount',
     filterReason:  reason,
+    score,
     posted:        false,
     priceHistory:  [priceEntry],
+    steps: {
+      scrape:    { done: true,  at: new Date() },
+      filter:    { done: true,  at: new Date(), reason },
+      affiliate: { done: !!(affiliateLink && affiliateLink !== url), at: new Date() },
+      telegram:  { done: false },
+    },
   });
   await pruneOldDeals();
   return created;
