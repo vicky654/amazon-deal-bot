@@ -21,41 +21,18 @@ function checkEnvVar(name) {
 
 function checkChrome() {
   const puppeteer = require('puppeteer');
-
-  const candidates = [];
-
-  // 1. Explicit env override
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    candidates.push({ path: process.env.PUPPETEER_EXECUTABLE_PATH, source: 'env' });
-  }
-
-  // 2. Bundled Chromium (downloaded by npm install — the correct path on Render)
   try {
-    const bundled = puppeteer.executablePath();
-    if (bundled) candidates.push({ path: bundled, source: 'bundled' });
-  } catch { /* puppeteer not available */ }
-
-  // 3. System Chrome fallbacks (only present if apt-get ran, which Render doesn't allow)
-  for (const p of [
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-  ]) {
-    candidates.push({ path: p, source: 'system' });
+    const bundledPath = puppeteer.executablePath();
+    const exists      = bundledPath && fs.existsSync(bundledPath);
+    return {
+      found:  exists,
+      path:   bundledPath,
+      source: 'bundled',
+      hint:   exists ? null : 'Chromium missing — PUPPETEER_SKIP_CHROMIUM_DOWNLOAD must NOT be set; redeploy to re-download it',
+    };
+  } catch (e) {
+    return { found: false, path: null, source: null, hint: e.message };
   }
-
-  for (const { path: p, source } of candidates) {
-    if (p && fs.existsSync(p)) return { found: true, path: p, source };
-  }
-
-  return {
-    found:   false,
-    path:    null,
-    source:  null,
-    checked: candidates.map((c) => c.path),
-    hint:    'PUPPETEER_SKIP_CHROMIUM_DOWNLOAD must NOT be set — delete it from Render env vars',
-  };
 }
 
 router.get('/crawler', async (req, res) => {
@@ -81,10 +58,22 @@ router.get('/crawler', async (req, res) => {
       TELEGRAM_CHAT:             checkEnvVar('TELEGRAM_CHAT'),
       MONGODB_URI:               checkEnvVar('MONGODB_URI'),
       JWT_SECRET:                checkEnvVar('JWT_SECRET'),
-      ALLOWED_ORIGINS:           checkEnvVar('ALLOWED_ORIGINS'),
-      AUTO_MODE_DEFAULT:         checkEnvVar('AUTO_MODE_DEFAULT'),
-      PUPPETEER_EXECUTABLE_PATH: checkEnvVar('PUPPETEER_EXECUTABLE_PATH'),
+      ALLOWED_ORIGINS:   checkEnvVar('ALLOWED_ORIGINS'),
+      AUTO_MODE_DEFAULT: checkEnvVar('AUTO_MODE_DEFAULT'),
       NODE_ENV: { set: true, preview: process.env.NODE_ENV || 'development' },
+      // These must NOT be set — flagged here if someone accidentally re-adds them
+      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: {
+        set:     !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD,
+        danger:  process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD === 'true'
+                   ? '⛔ DELETE THIS — it prevents Chromium from downloading'
+                   : null,
+      },
+      PUPPETEER_EXECUTABLE_PATH: {
+        set:    !!process.env.PUPPETEER_EXECUTABLE_PATH,
+        danger: process.env.PUPPETEER_EXECUTABLE_PATH
+                  ? '⛔ DELETE THIS — use puppeteer.executablePath() instead'
+                  : null,
+      },
     };
 
     res.json({
@@ -128,9 +117,10 @@ router.get('/crawler', async (req, res) => {
         error:     telegramError,
       },
       chrome: {
-        found:   chrome.found,
-        path:    chrome.path,
-        envPath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+        found:  chrome.found,
+        path:   chrome.path,
+        source: chrome.source,
+        hint:   chrome.hint || null,
       },
       env,
       system: {

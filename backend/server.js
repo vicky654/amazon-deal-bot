@@ -55,12 +55,12 @@ if (missingEnv.length) {
   }
 
   try {
-    const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath();
+    const chromePath = puppeteer.executablePath();
     if (chromePath && fs.existsSync(chromePath)) {
       logger.info(`[Boot] Chromium OK → ${chromePath}`);
     } else {
       logger.error(`[Boot] Chromium NOT FOUND at: ${chromePath}`);
-      logger.error('[Boot] Ensure PUPPETEER_SKIP_CHROMIUM_DOWNLOAD is deleted from Render env vars');
+      logger.error('[Boot] Delete PUPPETEER_SKIP_CHROMIUM_DOWNLOAD from Render env vars, then redeploy');
     }
   } catch (e) {
     logger.error(`[Boot] Chromium check failed: ${e.message}`);

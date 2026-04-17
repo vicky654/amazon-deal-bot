@@ -1,12 +1,8 @@
 /**
  * Singleton Browser Manager
  *
- * Resolves Chrome in this order:
- *   1. PUPPETEER_EXECUTABLE_PATH env var (explicit override)
- *   2. puppeteer.executablePath()  (bundled Chromium, downloaded at npm install)
- *
- * Never hardcodes /usr/bin/google-chrome-stable — that only exists when
- * apt-get install google-chrome-stable ran, which Render does not allow.
+ * Uses puppeteer.executablePath() — the bundled Chromium downloaded at npm install.
+ * No system Chrome. No env var overrides. Works on Render out of the box.
  */
 
 const puppeteer = require('puppeteer');
@@ -19,14 +15,13 @@ const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
 ];
 
-// Critical flags for running in containerised/restricted environments (Render, Docker, etc.)
 const LAUNCH_ARGS = [
   '--no-sandbox',
   '--disable-setuid-sandbox',
-  '--disable-dev-shm-usage',   // use /tmp instead of /dev/shm (small in containers)
+  '--disable-dev-shm-usage',
   '--disable-gpu',
-  '--no-zygote',               // prevents privileged zygote process (required on Render)
-  '--single-process',          // avoids forking issues in restricted containers
+  '--no-zygote',
+  '--single-process',
   '--disable-extensions',
   '--disable-background-networking',
   '--window-size=1366,768',
@@ -36,25 +31,12 @@ const LAUNCH_ARGS = [
 let _browser       = null;
 let _launchPromise = null;
 
-function getExecutablePath() {
-  // Explicit override (e.g. set in Render dashboard pointing to a known Chrome)
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
-  // Bundled Chromium downloaded by puppeteer during npm install
-  try {
-    return puppeteer.executablePath();
-  } catch {
-    return undefined;
-  }
-}
-
 async function getBrowser() {
   if (_browser && _browser.isConnected()) return _browser;
   if (_launchPromise) return _launchPromise;
 
-  const executablePath = getExecutablePath();
-  logger.info(`[Browser] Launching — executablePath: ${executablePath || 'not resolved'}`);
+  const executablePath = puppeteer.executablePath();
+  logger.info(`[Browser] Launching — bundled Chromium: ${executablePath}`);
 
   _launchPromise = puppeteer
     .launch({
@@ -67,19 +49,18 @@ async function getBrowser() {
     .then((browser) => {
       _browser       = browser;
       _launchPromise = null;
-
       browser.on('disconnected', () => {
         logger.warn('[Browser] Disconnected — will relaunch on next request');
         _browser = null;
       });
-
       logger.info('[Browser] Launched OK');
       return browser;
     })
     .catch((err) => {
       _launchPromise = null;
       logger.error(`[Browser] Launch FAILED: ${err.message}`);
-      logger.error('[Browser] If on Render: ensure PUPPETEER_SKIP_CHROMIUM_DOWNLOAD is NOT set');
+      logger.error(`[Browser] Expected Chromium at: ${executablePath}`);
+      logger.error('[Browser] Ensure PUPPETEER_SKIP_CHROMIUM_DOWNLOAD is NOT set in Render env vars');
       throw err;
     });
 
@@ -93,9 +74,6 @@ async function closeBrowser() {
   }
 }
 
-/**
- * Opens a stealth page. Always call page.close() after use.
- */
 async function openPage({ blockAssets = false, ua = null } = {}) {
   const browser = await getBrowser();
   const page    = await browser.newPage();
