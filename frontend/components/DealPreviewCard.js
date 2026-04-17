@@ -2,27 +2,27 @@
 
 import { useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { Copy, Check, ChevronDown } from 'lucide-react';
 import { systemApi } from '../lib/api';
 
 const ReelModal = dynamic(() => import('./reels/ReelModal'), { ssr: false });
 
-// ── Deal score badge ──────────────────────────────────────────────────────────
-
 function ScoreBadge({ score }) {
   if (score == null) return null;
-  const tier =
-    score >= 75 ? { label: '🔥 Hot',    cls: 'bg-red-100 text-red-700 border-red-200' } :
-    score >= 55 ? { label: '✅ Good',    cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' } :
-    score >= 35 ? { label: '👍 Decent',  cls: 'bg-blue-100 text-blue-700 border-blue-200' } :
-                  { label: '💤 Weak',    cls: 'bg-gray-100 text-gray-500 border-gray-200' };
+  const { label, bg, color } =
+    score >= 75 ? { label: '🔥 Hot',    bg: 'rgba(249,115,22,0.15)', color: '#fb923c' } :
+    score >= 55 ? { label: '✅ Good',   bg: 'rgba(52,211,153,0.12)', color: '#34d399' } :
+    score >= 35 ? { label: '👍 Decent', bg: 'rgba(96,165,250,0.12)', color: '#60a5fa' } :
+                  { label: '💤 Weak',   bg: 'rgba(100,116,139,0.12)', color: '#64748b' };
   return (
-    <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${tier.cls}`}>
-      {tier.label} <span className="opacity-70">({score})</span>
+    <span
+      className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full"
+      style={{ background: bg, color }}
+    >
+      {label} <span style={{ opacity: 0.6 }}>({score})</span>
     </span>
   );
 }
-
-// ── Pipeline step row ─────────────────────────────────────────────────────────
 
 function PipelineSteps({ deal, onRetry }) {
   const steps = deal.steps;
@@ -36,30 +36,35 @@ function PipelineSteps({ deal, onRetry }) {
   ];
 
   return (
-    <div className="space-y-1.5">
-      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Pipeline</p>
+    <div className="space-y-2">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600">Pipeline</p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {PIPELINE.map(({ key, label, icon, retryable }) => {
           const step = steps[key];
           const done = step?.done;
           const err  = step?.error;
           return (
-            <div key={key} className={`rounded-xl border p-2.5 text-center transition-all ${
-              done ? 'bg-emerald-50 border-emerald-200' :
-              err  ? 'bg-red-50 border-red-200' :
-                     'bg-gray-50 border-gray-200'
-            }`}>
+            <div
+              key={key}
+              className="rounded-2xl p-2.5 text-center"
+              style={{
+                background: done ? 'rgba(52,211,153,0.08)' : err ? 'rgba(239,68,68,0.08)' : 'rgba(30,41,59,0.6)',
+                border: `1px solid ${done ? 'rgba(52,211,153,0.20)' : err ? 'rgba(239,68,68,0.20)' : 'rgba(255,255,255,0.06)'}`,
+              }}
+            >
               <div className="text-base mb-1">{icon}</div>
-              <p className="text-[10px] font-semibold text-gray-700">{label}</p>
-              <p className={`text-[10px] font-bold mt-0.5 ${
-                done ? 'text-emerald-600' : err ? 'text-red-600' : 'text-gray-400'
-              }`}>
+              <p className="text-[10px] font-semibold text-slate-400">{label}</p>
+              <p
+                className="text-[10px] font-bold mt-0.5"
+                style={{ color: done ? '#34d399' : err ? '#f87171' : '#475569' }}
+              >
                 {done ? '✓ Done' : err ? '✗ Failed' : '– Pending'}
               </p>
               {err && retryable && (
                 <button
                   onClick={() => onRetry(key)}
-                  className="mt-1.5 text-[9px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700 hover:bg-red-200 transition-colors touch-manipulation"
+                  className="mt-1.5 text-[9px] font-semibold px-2 py-0.5 rounded-full touch-manipulation"
+                  style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171' }}
                 >
                   Retry
                 </button>
@@ -72,25 +77,19 @@ function PipelineSteps({ deal, onRetry }) {
   );
 }
 
-/**
- * Props:
- *   deal: object — deal data from the API
- *   onPostTelegram: () => Promise<void>
- *   telegramLoading: boolean
- */
 export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading }) {
-  const [imgError,            setImgError]            = useState(false);
-  const [copied,              setCopied]              = useState(false);
-  const [showTelegramPreview, setShowTelegramPreview] = useState(true);
-  const [reelOpen,            setReelOpen]            = useState(false);
-  const [retrying,            setRetrying]            = useState(null);   // 'telegram' | 'affiliate' | null
-  const [retryResult,         setRetryResult]         = useState(null);
+  const [imgError,     setImgError]     = useState(false);
+  const [copied,       setCopied]       = useState(false);
+  const [showPreview,  setShowPreview]  = useState(true);
+  const [reelOpen,     setReelOpen]     = useState(false);
+  const [retrying,     setRetrying]     = useState(null);
+  const [retryResult,  setRetryResult]  = useState(null);
 
   const handleRetry = useCallback(async (step) => {
     setRetrying(step);
     setRetryResult(null);
     try {
-      const fn = step === 'telegram' ? systemApi.retryTelegram : systemApi.retryAffiliate;
+      const fn  = step === 'telegram' ? systemApi.retryTelegram : systemApi.retryAffiliate;
       const res = await fn(deal._id);
       setRetryResult({ ok: res.ok, step, error: res.error });
     } catch (e) {
@@ -100,63 +99,67 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
     }
   }, [deal._id]);
 
-  // `discount` = percentage off; `savings` = rupees saved (model has both)
-  const discountPct = deal.discount ?? deal.savings;
-
-  const formattedPrice    = deal.price         ? `₹${deal.price.toLocaleString('en-IN')}`         : 'N/A';
-  const formattedOriginal = deal.originalPrice ? `₹${deal.originalPrice.toLocaleString('en-IN')}` : null;
-  const rupeeSaved        = (deal.originalPrice && deal.price)
+  const discountPct    = deal.discount ?? deal.savings;
+  const formattedPrice = deal.price         ? `₹${deal.price.toLocaleString('en-IN')}`         : 'N/A';
+  const formattedMRP   = deal.originalPrice ? `₹${deal.originalPrice.toLocaleString('en-IN')}` : null;
+  const rupeeSaved     = (deal.originalPrice && deal.price)
     ? (deal.originalPrice - deal.price).toLocaleString('en-IN')
     : null;
+
+  const telegramText = [
+    '🔥 Amazon Deal', '',
+    deal.title, '',
+    formattedMRP ? `~~${formattedMRP}~~  →  *${formattedPrice}*` : `*${formattedPrice}*`,
+    deal.savings ? `💰 Save ${deal.savings}% off` : '',
+    '', '🛒 Buy Now:', deal.link,
+  ].filter((l, i, a) => !(l === '' && a[i - 1] === '')).join('\n');
 
   async function copyLink() {
     try {
       await navigator.clipboard.writeText(deal.link);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Silently fail
-    }
+    } catch { /* silent */ }
   }
 
-  // Build Telegram message preview
-  const telegramText = [
-    '🔥 Amazon Deal',
-    '',
-    deal.title,
-    '',
-    formattedOriginal ? `~~${formattedOriginal}~~  →  *${formattedPrice}*` : `*${formattedPrice}*`,
-    deal.savings ? `💰 Save ${deal.savings}% off` : '',
-    '',
-    '🛒 Buy Now:',
-    deal.link,
-  ].filter((line, i, arr) => !(line === '' && arr[i - 1] === '')).join('\n');
-
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      {/* Deal header bar */}
-      <div className="bg-gradient-to-r from-orange-500 to-orange-400 px-4 sm:px-5 py-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          <span className="text-white font-semibold text-sm">Deal Preview</span>
+    <div
+      className="rounded-2xl overflow-hidden"
+      style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid rgba(255,255,255,0.08)' }}
+    >
+      {/* Header bar */}
+      <div
+        className="px-4 sm:px-5 py-3 flex items-center justify-between gap-2"
+        style={{ background: 'linear-gradient(135deg, rgba(249,115,22,0.20), rgba(234,88,12,0.10))', borderBottom: '1px solid rgba(249,115,22,0.15)' }}
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-white font-bold text-sm">Deal Preview</span>
           {discountPct != null && (
-            <span className="bg-white text-orange-600 text-xs font-bold px-2 py-0.5 rounded-full">
+            <span
+              className="text-xs font-bold px-2 py-0.5 rounded-full"
+              style={{ background: 'rgba(249,115,22,0.25)', color: '#fb923c', border: '1px solid rgba(249,115,22,0.30)' }}
+            >
               {discountPct}% OFF
             </span>
           )}
           <ScoreBadge score={deal.score} />
         </div>
         {deal.asin && (
-          <span className="text-orange-100 text-xs font-mono truncate max-w-[120px] sm:max-w-none">
-            ASIN: {deal.asin}
+          <span className="text-slate-500 text-xs font-mono truncate max-w-[100px] sm:max-w-none">
+            {deal.asin}
           </span>
         )}
       </div>
 
       <div className="p-4 sm:p-5">
         <div className="grid md:grid-cols-5 gap-5">
+
           {/* Product image */}
           <div className="md:col-span-2">
-            <div className="aspect-square rounded-xl bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center">
+            <div
+              className="aspect-square rounded-2xl overflow-hidden flex items-center justify-center"
+              style={{ background: 'rgba(30,41,59,0.6)', border: '1px solid rgba(255,255,255,0.06)' }}
+            >
               {deal.image && !imgError ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -166,7 +169,7 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
                   className="w-full h-full object-contain p-4"
                 />
               ) : (
-                <div className="flex flex-col items-center gap-2 text-slate-300">
+                <div className="flex flex-col items-center gap-2 text-slate-700">
                   <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
@@ -176,135 +179,118 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
             </div>
           </div>
 
-          {/* Product details */}
+          {/* Details */}
           <div className="md:col-span-3 flex flex-col gap-4">
+
             {/* Title */}
             <div>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Product</p>
-              <h2 className="text-slate-900 font-semibold text-base leading-snug line-clamp-3">
-                {deal.title}
-              </h2>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">Product</p>
+              <h2 className="text-slate-100 font-semibold text-base leading-snug line-clamp-3">{deal.title}</h2>
             </div>
 
-            {/* Price block */}
+            {/* Price */}
             <div className="flex flex-wrap items-center gap-3">
-              <span className="text-2xl font-bold text-orange-500">{formattedPrice}</span>
-
-              {formattedOriginal && (
-                <span className="text-base text-slate-400 line-through">{formattedOriginal}</span>
+              <span className="text-2xl font-bold" style={{ color: '#fb923c' }}>{formattedPrice}</span>
+              {formattedMRP && (
+                <span className="text-base text-slate-600 line-through">{formattedMRP}</span>
               )}
-
-              {discountPct != null ? (
-                <span className="bg-green-100 text-green-700 text-sm font-bold px-2.5 py-0.5 rounded-full">
+              {discountPct != null && (
+                <span
+                  className="text-sm font-bold px-2.5 py-0.5 rounded-full"
+                  style={{ background: 'rgba(52,211,153,0.12)', color: '#34d399' }}
+                >
                   {discountPct}% off
                 </span>
-              ) : (
-                <span className="bg-slate-100 text-slate-500 text-xs px-2 py-0.5 rounded-full">
-                  No savings data
-                </span>
               )}
             </div>
 
-            {/* Stats chips */}
+            {/* Chips */}
             <div className="flex flex-wrap gap-2">
               {rupeeSaved && (
-                <div className="flex items-center gap-1.5 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">
-                  <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                  </svg>
-                  <span className="text-xs font-semibold text-green-700">Saving ₹{rupeeSaved}</span>
+                <div
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold"
+                  style={{ background: 'rgba(52,211,153,0.10)', border: '1px solid rgba(52,211,153,0.18)', color: '#34d399' }}
+                >
+                  💰 Save ₹{rupeeSaved}
                 </div>
               )}
-
-              {deal.asin && (
-                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
-                  <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-                  </svg>
-                  <span className="text-xs font-mono text-slate-500">{deal.asin}</span>
-                </div>
-              )}
-
               {deal.clicks > 0 && (
-                <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">
-                  <svg className="w-3.5 h-3.5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5" />
-                  </svg>
-                  <span className="text-xs font-semibold text-orange-700">{deal.clicks} click{deal.clicks !== 1 ? 's' : ''}</span>
+                <div
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold"
+                  style={{ background: 'rgba(249,115,22,0.10)', border: '1px solid rgba(249,115,22,0.18)', color: '#fb923c' }}
+                >
+                  👆 {deal.clicks} click{deal.clicks !== 1 ? 's' : ''}
                 </div>
               )}
             </div>
 
-            {/* Pipeline steps */}
+            {/* Pipeline */}
             <PipelineSteps deal={deal} onRetry={handleRetry} />
 
-            {/* Retry result banner */}
             {retryResult && (
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium border ${
-                retryResult.ok
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                  : 'bg-red-50 border-red-200 text-red-700'
-              }`}>
+              <div
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium"
+                style={{
+                  background: retryResult.ok ? 'rgba(52,211,153,0.10)' : 'rgba(239,68,68,0.10)',
+                  border: `1px solid ${retryResult.ok ? 'rgba(52,211,153,0.20)' : 'rgba(239,68,68,0.20)'}`,
+                  color: retryResult.ok ? '#34d399' : '#f87171',
+                }}
+              >
                 <span>{retryResult.ok ? '✅' : '❌'}</span>
-                <span>
-                  {retryResult.ok
-                    ? `${retryResult.step} retry succeeded`
-                    : `Retry failed: ${retryResult.error}`}
+                <span className="flex-1">
+                  {retryResult.ok ? `${retryResult.step} retry succeeded` : `Retry failed: ${retryResult.error}`}
                 </span>
-                <button onClick={() => setRetryResult(null)} className="ml-auto opacity-50 hover:opacity-80 touch-manipulation">✕</button>
+                <button onClick={() => setRetryResult(null)} style={{ opacity: 0.5 }}>✕</button>
               </div>
             )}
 
             {/* Affiliate link */}
             <div className="flex items-center gap-2">
-              <div className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 overflow-hidden">
-                <p className="text-xs text-slate-400 font-medium mb-0.5">Affiliate link</p>
-                <p className="text-xs text-slate-600 truncate font-mono">{deal.link}</p>
+              <div
+                className="flex-1 px-3 py-2.5 rounded-xl overflow-hidden"
+                style={{ background: 'rgba(30,41,59,0.8)', border: '1px solid rgba(255,255,255,0.06)' }}
+              >
+                <p className="text-[10px] text-slate-600 font-medium mb-0.5">Affiliate link</p>
+                <p className="text-xs text-slate-400 truncate font-mono">{deal.link}</p>
               </div>
               <button
                 onClick={copyLink}
-                title="Copy affiliate link"
-                className={`shrink-0 p-2.5 rounded-xl border transition-all
-                  ${copied
-                    ? 'bg-green-50 border-green-200 text-green-600'
-                    : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700'}`}
+                title="Copy link"
+                className="shrink-0 p-2.5 rounded-xl transition-all touch-manipulation active:scale-95"
+                style={copied
+                  ? { background: 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.25)', color: '#34d399' }
+                  : { background: 'rgba(30,41,59,0.8)', border: '1px solid rgba(255,255,255,0.06)', color: '#64748b' }
+                }
               >
-                {copied ? (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                )}
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
 
             {/* Telegram preview toggle */}
             <div>
               <button
-                onClick={() => setShowTelegramPreview((v) => !v)}
-                className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors mb-2"
+                onClick={() => setShowPreview((v) => !v)}
+                className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-400 transition-colors mb-2 touch-manipulation"
               >
-                <svg
-                  className={`w-3.5 h-3.5 transition-transform ${showTelegramPreview ? 'rotate-90' : ''}`}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-                Telegram message preview
+                <ChevronDown
+                  className="w-3.5 h-3.5 transition-transform"
+                  style={{ transform: showPreview ? 'rotate(180deg)' : 'none' }}
+                />
+                Telegram preview
               </button>
-
-              {showTelegramPreview && (
-                <div className="bg-[#17212b] rounded-xl p-4 relative">
-                  {/* Telegram mock header */}
-                  <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/10">
-                    <div className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
-                      D
-                    </div>
+              {showPreview && (
+                <div
+                  className="rounded-2xl p-4"
+                  style={{ background: '#17212b', border: '1px solid rgba(255,255,255,0.08)' }}
+                >
+                  <div
+                    className="flex items-center gap-2 mb-3 pb-2"
+                    style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+                  >
+                    <div className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0">D</div>
                     <div>
                       <p className="text-white text-xs font-semibold leading-none">Daily Amazon Deals</p>
-                      <p className="text-white/40 text-[10px]">Channel</p>
+                      <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>Channel</p>
                     </div>
                   </div>
                   <pre className="text-[11px] text-[#b0bec5] whitespace-pre-wrap font-sans leading-relaxed break-all">
@@ -316,15 +302,14 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
 
             {/* Action buttons */}
             <div className="flex flex-col gap-2">
-              {/* Post to Telegram */}
               <button
                 onClick={onPostTelegram}
                 disabled={telegramLoading || retrying === 'telegram'}
-                className={`w-full py-3 px-4 rounded-xl text-sm font-semibold text-white
-                  flex items-center justify-center gap-2 transition-all duration-200 touch-manipulation
-                  ${telegramLoading || retrying === 'telegram'
-                    ? 'bg-slate-300 cursor-not-allowed'
-                    : 'bg-blue-500 hover:bg-blue-600 shadow-md shadow-blue-500/30 hover:shadow-blue-500/40 active:scale-[0.99]'}`}
+                className="w-full py-3 px-4 rounded-2xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all touch-manipulation active:scale-[0.98]"
+                style={telegramLoading || retrying === 'telegram'
+                  ? { background: 'rgba(71,85,105,0.5)', cursor: 'not-allowed' }
+                  : { background: 'linear-gradient(135deg,#3b82f6,#2563eb)', boxShadow: '0 4px 16px rgba(59,130,246,0.30)' }
+                }
               >
                 {telegramLoading ? (
                   <>
@@ -332,7 +317,7 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    Posting to Telegram...
+                    Posting…
                   </>
                 ) : (
                   <>
@@ -344,13 +329,11 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
                 )}
               </button>
 
-              {/* Create Instagram Reel */}
               {deal._id && (
                 <button
                   onClick={() => setReelOpen(true)}
-                  className="w-full py-3 px-4 rounded-xl text-sm font-semibold text-white
-                    flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
-                  style={{ background: 'linear-gradient(135deg,#7c3aed,#ec4899)', boxShadow: '0 4px 14px rgba(124,58,237,0.25)' }}
+                  className="w-full py-3 px-4 rounded-2xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98] touch-manipulation"
+                  style={{ background: 'linear-gradient(135deg,#7c3aed,#ec4899)', boxShadow: '0 4px 16px rgba(124,58,237,0.25)' }}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -361,9 +344,7 @@ export default function DealPreviewCard({ deal, onPostTelegram, telegramLoading 
               )}
             </div>
 
-            {reelOpen && (
-              <ReelModal deal={deal} onClose={() => setReelOpen(false)} />
-            )}
+            {reelOpen && <ReelModal deal={deal} onClose={() => setReelOpen(false)} />}
           </div>
         </div>
       </div>

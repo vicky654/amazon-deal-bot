@@ -72,7 +72,7 @@ export default function GeneratePage() {
     <div className="space-y-5">
       {/* ── Page header ── */}
       <header className="space-y-1">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Generate Deal</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-white">Generate Deal</h1>
         <p className="text-sm text-slate-500">
           Paste any Amazon URL or short link — price, discount, and affiliate link extracted automatically.
         </p>
@@ -99,23 +99,26 @@ export default function GeneratePage() {
 
           {/* Reel CTA */}
           {deal._id && (
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-5 py-4 bg-gradient-to-r from-violet-50 to-pink-50 border border-violet-200 rounded-2xl">
+            <div
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-5 py-4 rounded-2xl"
+              style={{ background: 'rgba(124,58,237,0.10)', border: '1px solid rgba(124,58,237,0.20)' }}
+            >
               <div className="flex items-center gap-3">
                 <div
-                  className="h-10 w-10 rounded-xl flex items-center justify-center text-lg shrink-0"
-                  style={{ background: 'linear-gradient(135deg,#7c3aed,#ec4899)' }}
+                  className="h-10 w-10 rounded-2xl flex items-center justify-center text-lg shrink-0"
+                  style={{ background: 'linear-gradient(135deg,#7c3aed,#ec4899)', boxShadow: '0 4px 12px rgba(124,58,237,0.35)' }}
                 >
                   🎬
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-gray-900">Create Instagram Reel</p>
-                  <p className="text-xs text-gray-500">Generate a viral 1080×1920 MP4 + caption</p>
+                  <p className="text-sm font-semibold text-white">Create Instagram Reel</p>
+                  <p className="text-xs text-slate-500">Generate a viral 1080×1920 MP4 + caption</p>
                 </div>
               </div>
               <button
                 onClick={() => setReelOpen(true)}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white rounded-xl transition-all active:scale-[0.97] touch-manipulation"
-                style={{ background: 'linear-gradient(135deg,#7c3aed,#ec4899)', boxShadow: '0 4px 14px rgba(124,58,237,0.30)' }}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white rounded-2xl transition-all active:scale-[0.97] touch-manipulation"
+                style={{ background: 'linear-gradient(135deg,#7c3aed,#ec4899)', boxShadow: '0 4px 14px rgba(124,58,237,0.35)' }}
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

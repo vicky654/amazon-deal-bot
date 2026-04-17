@@ -3,18 +3,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  Plus,
-  Package,
-  Activity,
-  MessageSquare,
-  Wallet,
-  Info,
-  BarChart2,
-  ListChecks,
-  Cpu,
-  MousePointerClick,
-  LayoutDashboard,
-  Bug,
+  Plus, Package, Activity, MessageSquare,
+  Wallet, Info, BarChart2, ListChecks,
+  Cpu, MousePointerClick, LayoutDashboard, Bug,
 } from 'lucide-react';
 
 const MENU = [
@@ -27,18 +18,18 @@ const MENU = [
   {
     section: 'Tools',
     items: [
-      { label: 'Generate Deal',     href: '/admin/generate', icon: Plus        },
-      { label: 'Recent Deals',      href: '/admin/deals',    icon: Package     },
-      { label: 'Crawler Status',    href: '/admin/crawler',  icon: Activity    },
+      { label: 'Generate Deal',     href: '/admin/generate', icon: Plus         },
+      { label: 'All Deals',         href: '/admin/deals',    icon: Package      },
+      { label: 'Crawler',           href: '/admin/crawler',  icon: Activity     },
       { label: 'Custom Message',    href: '/admin/message',  icon: MessageSquare },
     ],
   },
   {
     section: 'Affiliate',
     items: [
-      { label: 'EarnKaro Settings', href: '/admin/settings',           icon: Wallet           },
-      { label: 'Affiliate History', href: '/admin/affiliate-history',  icon: ListChecks       },
-      { label: 'EarnKaro Debug',    href: '/admin/earnkaro-debug',     icon: Bug,             badge: 'New' },
+      { label: 'EarnKaro Settings', href: '/admin/settings',           icon: Wallet            },
+      { label: 'Affiliate History', href: '/admin/affiliate-history',  icon: ListChecks        },
+      { label: 'EarnKaro Debug',    href: '/admin/earnkaro-debug',     icon: Bug,   badge: 'New'  },
       { label: 'Analytics',         href: '/admin/analytics',          icon: MousePointerClick },
     ],
   },
@@ -48,10 +39,15 @@ const MENU = [
       { label: 'Cron Monitor',   href: '/admin/system',       icon: Cpu,        badge: 'Live' },
       { label: 'Testing Panel',  href: '/admin/testing',      icon: ListChecks, badge: 'New'  },
       { label: 'How It Works',   href: '/admin/how-it-works', icon: Info        },
-      { label: 'System Metrics', href: '/admin/metrics',      icon: BarChart2   },
+      { label: 'Metrics',        href: '/admin/metrics',      icon: BarChart2   },
     ],
   },
 ];
+
+const BADGE_COLORS = {
+  Live: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
+  New:  'bg-violet-500/20  text-violet-400  border border-violet-500/30',
+};
 
 export default function Sidebar({ open = false, onClose = () => {} }) {
   const pathname = usePathname();
@@ -63,81 +59,88 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
 
   return (
     <>
-      {/* Mobile backdrop — sits below sidebar (z-20), above content */}
+      {/* Mobile backdrop */}
       {open && (
         <div
-          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-20 lg:hidden"
           onClick={onClose}
           aria-hidden="true"
         />
       )}
 
-      {/*
-       * SIDEBAR:
-       *
-       * Mobile  → fixed, full-height, slides in/out via translate
-       * Desktop → static, h-screen, shrink-0 so it never collapses
-       *
-       * h-screen + flex flex-col ensures the sidebar fills the viewport
-       * and the nav area (flex-1 overflow-y-auto) scrolls independently.
-       */}
       <aside
         className={[
-          // Base — mobile: fixed overlay
           'fixed inset-y-0 left-0 z-30',
           'w-64 xl:w-72',
-          'bg-slate-900 text-white',
           'flex flex-col',
           'transform transition-transform duration-300 ease-in-out',
           open ? 'translate-x-0' : '-translate-x-full',
-          // Desktop: back in flow, exact viewport height, no translate
           'lg:relative lg:translate-x-0 lg:h-screen lg:shrink-0',
         ].join(' ')}
+        style={{
+          background: 'rgba(2, 6, 23, 0.95)',
+          backdropFilter: 'blur(20px)',
+          borderRight: '1px solid rgba(255,255,255,0.06)',
+        }}
       >
-        {/* Logo header */}
-        <div className="shrink-0 flex items-center gap-3 px-5 py-5 border-b border-slate-700/60">
-          <div className="w-9 h-9 rounded-xl bg-orange-500 flex items-center justify-center text-base shrink-0">
+        {/* Logo */}
+        <div
+          className="shrink-0 flex items-center gap-3 px-5 py-5"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+        >
+          <div
+            className="w-10 h-10 rounded-2xl flex items-center justify-center text-base shrink-0 shadow-lg"
+            style={{
+              background: 'linear-gradient(135deg,#f97316,#ea580c)',
+              boxShadow: '0 4px 16px rgba(249,115,22,0.35)',
+            }}
+          >
             🔥
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-bold tracking-tight truncate">DealBots</p>
-            <p className="text-xs text-slate-400 truncate">Admin Dashboard</p>
+            <p className="text-sm font-bold text-white tracking-tight truncate">DealBot</p>
+            <p className="text-[11px] text-slate-500 truncate">Admin Panel</p>
           </div>
         </div>
 
-        {/* Nav — scrolls independently when menu is long */}
-        <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-5">
+        {/* Nav */}
+        <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-6 scrollbar-none">
           {MENU.map((group) => (
             <div key={group.section}>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5 px-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-2 px-2">
                 {group.section}
               </p>
-
               <div className="space-y-0.5">
                 {group.items.map((item) => {
                   const active = isActive(item.href);
                   const Icon   = item.icon;
-
                   return (
                     <Link
                       key={item.label}
                       href={item.href}
                       onClick={onClose}
                       className={[
-                        'group flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all',
+                        'group flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all touch-manipulation',
                         active
-                          ? 'bg-orange-500 text-white shadow-md shadow-orange-500/25'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800',
+                          ? 'text-white'
+                          : 'text-slate-400 hover:text-white',
                       ].join(' ')}
+                      style={active ? {
+                        background: 'linear-gradient(135deg, rgba(249,115,22,0.18), rgba(234,88,12,0.10))',
+                        border: '1px solid rgba(249,115,22,0.25)',
+                      } : {
+                        border: '1px solid transparent',
+                      }}
                     >
                       <Icon
-                        className={`w-4 h-4 shrink-0 ${
-                          active ? 'text-white' : 'text-slate-500 group-hover:text-white'
+                        className={`w-4 h-4 shrink-0 transition-colors ${
+                          active ? 'text-orange-400' : 'text-slate-600 group-hover:text-slate-400'
                         }`}
+                        strokeWidth={active ? 2.5 : 1.75}
                       />
                       <span className="flex-1 truncate">{item.label}</span>
                       {item.badge && (
-                        <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-500 text-white">
+                        <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${BADGE_COLORS[item.badge] ?? ''}`}>
                           {item.badge}
                         </span>
                       )}
@@ -150,12 +153,15 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
         </nav>
 
         {/* Footer */}
-        <div className="shrink-0 px-5 py-3 border-t border-slate-700/60">
+        <div
+          className="shrink-0 px-5 py-4"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+        >
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs text-slate-400">Backend connected</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <span className="text-xs text-slate-500">Backend connected</span>
           </div>
-          <p className="text-[11px] text-slate-600 mt-0.5">amazon.in · Telegram</p>
+          <p className="text-[11px] text-slate-700 mt-1">Amazon · Flipkart · Telegram</p>
         </div>
       </aside>
     </>

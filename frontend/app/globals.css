@@ -3,36 +3,28 @@
 @tailwind utilities;
 
 @layer base {
-  /*
-   * GLOBAL OVERFLOW RULES
-   * ---------------------
-   * overflow-x: hidden on html + body eliminates horizontal scroll that comes
-   * from any element accidentally wider than the viewport (e.g. a pre block,
-   * a wide image, or a flex child without min-w-0).
-   *
-   * We do NOT set overflow-y: hidden here — the AdminShell's <main> handles
-   * vertical scrolling internally via overflow-y: auto.
-   */
   html {
     overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    /* iOS rubber-band scroll on the document itself (we want it only in <main>) */
     overscroll-behavior: none;
   }
 
   body {
     overflow-x: hidden;
     width: 100%;
-    @apply bg-slate-50 text-slate-900;
+    @apply bg-slate-950 text-slate-100;
   }
 
-  * {
-    box-sizing: border-box;
-  }
+  * { box-sizing: border-box; }
 
-  /* Remove default list styles inside nav */
   nav ul, nav ol { list-style: none; padding: 0; margin: 0; }
+
+  /* Smooth scrolling everywhere */
+  * { scroll-behavior: smooth; }
+
+  /* Better tap highlight on mobile */
+  * { -webkit-tap-highlight-color: transparent; }
 }
 
 @layer utilities {
@@ -56,13 +48,13 @@
     overflow: hidden;
   }
 
-  /* ── Skeleton shimmer ── */
+  /* ── Skeleton shimmer (dark mode) ── */
   @keyframes shimmer {
     0%   { background-position: -400px 0; }
     100% { background-position:  400px 0; }
   }
   .skeleton {
-    background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+    background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
     background-size: 800px 100%;
     animation: shimmer 1.4s ease-in-out infinite;
   }
@@ -80,21 +72,59 @@
   }
   .toast-exit { animation: slideDown 0.25s ease-in forwards; }
 
-  /*
-   * ── Safe bottom padding (for mobile notch / home indicator)
-   * Applies iOS safe-area inset so BottomNav never overlaps the home bar.
-   */
-  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  /* ── Fade in up (cards, content) ── */
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in-up {
+    animation: fadeInUp 0.35s ease-out forwards;
+  }
 
-  /*
-   * ── Horizontal scroll container (for tables / wide cards on mobile)
-   * Use on a wrapper div around any content that must scroll horizontally
-   * without triggering full-page horizontal scroll.
-   */
+  /* ── Stagger children (add delay via style) ── */
+  .stagger-children > * {
+    opacity: 0;
+    animation: fadeInUp 0.35s ease-out forwards;
+  }
+  .stagger-children > *:nth-child(1) { animation-delay: 0.05s; }
+  .stagger-children > *:nth-child(2) { animation-delay: 0.10s; }
+  .stagger-children > *:nth-child(3) { animation-delay: 0.15s; }
+  .stagger-children > *:nth-child(4) { animation-delay: 0.20s; }
+  .stagger-children > *:nth-child(5) { animation-delay: 0.25s; }
+
+  /* ── Glow effects ── */
+  .glow-orange { box-shadow: 0 0 20px rgba(249,115,22,0.25); }
+  .glow-emerald { box-shadow: 0 0 20px rgba(52,211,153,0.20); }
+  .glow-blue { box-shadow: 0 0 20px rgba(96,165,250,0.20); }
+
+  /* ── Glass card ── */
+  .glass {
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  /* ── Safe-area ── */
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .safe-top    { padding-top: env(safe-area-inset-top, 0px); }
+  .pb-safe     { padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.5rem); }
+
+  /* ── Scroll helpers ── */
   .scroll-x {
     overflow-x: auto;
     overflow-y: visible;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
+    scrollbar-width: none;
   }
+  .scroll-x::-webkit-scrollbar { display: none; }
+
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+
+  /* ── Active press scale ── */
+  .active-scale:active { transform: scale(0.97); }
 }

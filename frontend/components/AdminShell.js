@@ -2,16 +2,36 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Menu, X, LogOut } from 'lucide-react';
+import { useRouter, usePathname } from 'next/navigation';
+import { Menu, X, LogOut, Zap } from 'lucide-react';
 
 import Sidebar   from './Sidebar';
 import BottomNav from './BottomNav';
+import FAB       from './FAB';
 import { removeToken } from '../lib/auth';
+
+/* Map pathname → page title shown in mobile header */
+const PAGE_TITLES = {
+  '/admin':                   'Dashboard',
+  '/admin/generate':          'Generate Deal',
+  '/admin/deals':             'All Deals',
+  '/admin/analytics':         'Analytics',
+  '/admin/crawler':           'Crawler',
+  '/admin/system':            'System',
+  '/admin/settings':          'Settings',
+  '/admin/testing':           'Testing',
+  '/admin/message':           'Custom Message',
+  '/admin/metrics':           'Metrics',
+  '/admin/how-it-works':      'How It Works',
+  '/admin/earnkaro-debug':    'EarnKaro Debug',
+  '/admin/affiliate-history': 'Affiliate History',
+};
 
 export default function AdminShell({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const router = useRouter();
+  const router   = useRouter();
+  const pathname = usePathname();
+  const title    = PAGE_TITLES[pathname] ?? 'DealBot';
 
   function handleLogout() {
     removeToken();
@@ -19,86 +39,92 @@ export default function AdminShell({ children }) {
   }
 
   return (
-    /*
-     * ROOT:  h-screen + overflow-hidden
-     *   → Pins the entire shell to exactly the viewport height.
-     *   → `min-h-screen` would let the container grow taller than the viewport,
-     *     which breaks independent-scroll isolation between sidebar and content.
-     *   → overflow-hidden prevents any document-level scroll (both axes).
-     */
-    <div className="h-screen flex overflow-hidden bg-slate-50">
+    <div className="h-screen flex overflow-hidden bg-slate-950">
 
       {/* ── Sidebar ── */}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      {/*
-       * MAIN COLUMN:  flex-1 flex flex-col min-w-0 min-h-0
-       *   min-w-0  → allows flex child to shrink below its content width (prevents
-       *              sidebar pushing the right column off-screen)
-       *   min-h-0  → allows flex child to shrink below its content height (critical
-       *              in a flex column so children can scroll independently)
-       *   overflow-hidden → clips the column; actual scroll is on <main> below
-       */}
+      {/* ── Right column ── */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
 
-        {/* ── Sticky header ── */}
-        <header className="shrink-0 sticky top-0 z-20 bg-white/80 backdrop-blur-sm border-b border-slate-200">
-          <div className="w-full max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+        {/* ── Header ── */}
+        <header
+          className="shrink-0 sticky top-0 z-20 safe-top"
+          style={{
+            background: 'rgba(2, 6, 23, 0.85)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          <div className="w-full max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+
+            {/* Left: hamburger + logo/title */}
+            <div className="flex items-center gap-3 min-w-0">
               <button
                 type="button"
                 onClick={() => setSidebarOpen((v) => !v)}
-                className="lg:hidden p-2 rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition touch-manipulation"
+                className="lg:hidden p-2 -ml-1 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition touch-manipulation"
                 aria-label="Toggle menu"
               >
                 {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </button>
-              <Link href="/admin" className="flex items-center gap-2">
-                <span className="text-lg">🔥</span>
-                <span className="text-sm font-semibold text-slate-900 hover:text-slate-700">
-                  DealBot Admin
-                </span>
+
+              {/* Desktop: logo link */}
+              <Link href="/admin" className="hidden lg:flex items-center gap-2.5 shrink-0">
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center text-sm"
+                  style={{ background: 'linear-gradient(135deg,#f97316,#ea580c)' }}>
+                  🔥
+                </div>
+                <span className="text-sm font-bold text-white">DealBot</span>
               </Link>
+
+              {/* Mobile: page title */}
+              <h1 className="lg:hidden text-base font-bold text-white truncate">{title}</h1>
             </div>
 
-            <div className="flex items-center gap-2 sm:gap-4">
-              <div className="hidden sm:flex items-center gap-4">
-                <Link href="/admin/how-it-works" className="text-xs font-medium text-slate-500 hover:text-slate-800">
-                  How It Works
-                </Link>
-                <Link href="/admin/settings" className="text-xs font-medium text-slate-500 hover:text-slate-800">
-                  Settings
-                </Link>
+            {/* Right: status pill + logout */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Live indicator */}
+              <div
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
+                style={{
+                  background: 'rgba(249,115,22,0.12)',
+                  border: '1px solid rgba(249,115,22,0.25)',
+                  color: '#fb923c',
+                }}
+              >
+                <Zap className="w-3 h-3" />
+                Live
               </div>
 
               <button
                 onClick={handleLogout}
                 title="Logout"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition touch-manipulation"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <LogOut className="w-4 h-4" />
                 <span className="hidden sm:inline">Logout</span>
               </button>
             </div>
           </div>
         </header>
 
-        {/*
-         * SCROLLABLE CONTENT AREA:
-         *   flex-1  → fills remaining vertical space below header
-         *   overflow-y-auto → vertical scroll ONLY here (not on body)
-         *   overflow-x-hidden → hard-clips any content wider than the column
-         *   pb-16 lg:pb-0 → clearance for mobile BottomNav
-         */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden [-webkit-overflow-scrolling:touch] pb-16 lg:pb-0">
-          <div className="w-full max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+        {/* ── Scrollable content ── */}
+        <main
+          className="flex-1 overflow-y-auto overflow-x-hidden [-webkit-overflow-scrolling:touch] pb-24 lg:pb-6"
+        >
+          <div className="w-full max-w-7xl mx-auto px-3 sm:px-5 py-4 sm:py-6 animate-fade-in-up">
             {children}
           </div>
         </main>
       </div>
 
-      {/* Mobile bottom nav — fixed, lg:hidden */}
+      {/* Mobile bottom nav */}
       <BottomNav />
+
+      {/* FAB — mobile only */}
+      <FAB className="lg:hidden" />
     </div>
   );
 }
