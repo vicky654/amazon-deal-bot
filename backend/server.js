@@ -39,6 +39,34 @@ if (missingEnv.length) {
   logger.warn(`Missing env vars: ${missingEnv.join(', ')} — some features disabled`);
 }
 
+// ── Chromium boot-check ────────────────────────────────────────────────────────
+// Catches Puppeteer misconfiguration at startup (visible in Render build/deploy logs)
+// instead of silently failing during a crawl cycle 15 minutes later.
+{
+  const fs = require('fs');
+  const puppeteer = require('puppeteer');
+
+  if (process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD === 'true') {
+    logger.error('════════════════════════════════════════════════════════');
+    logger.error('PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true is SET — Chromium was NOT downloaded.');
+    logger.error('DELETE this env var from Render dashboard, then redeploy.');
+    logger.error('Scraping will return 0 results until this is fixed.');
+    logger.error('════════════════════════════════════════════════════════');
+  }
+
+  try {
+    const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath();
+    if (chromePath && fs.existsSync(chromePath)) {
+      logger.info(`[Boot] Chromium OK → ${chromePath}`);
+    } else {
+      logger.error(`[Boot] Chromium NOT FOUND at: ${chromePath}`);
+      logger.error('[Boot] Ensure PUPPETEER_SKIP_CHROMIUM_DOWNLOAD is deleted from Render env vars');
+    }
+  } catch (e) {
+    logger.error(`[Boot] Chromium check failed: ${e.message}`);
+  }
+}
+
 const PORT          = process.env.PORT          || 5000;
 const MONGODB_URI   = process.env.MONGODB_URI   || 'mongodb://localhost:27017/deal-system';
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/5 * * * *'; // every 5 min
@@ -260,9 +288,26 @@ if (require.main === module) {
     logger.info(`Cron: ${CRON_SCHEDULE} (interval ~${parseIntervalMinutes(CRON_SCHEDULE)} min)`);
     logger.info(`CORS: ${rawOrigins ? `restricted to ${rawOrigins}` : 'open (*)'}`);
     telegram.sendTestMessage().catch(() => {});
-
-    // Start EarnKaro auto-refresh cron (independent of main crawler)
     earnkaroAutoRefresh.start();
+
+    // Keep-alive self-ping — prevents Render free tier from sleeping during active crawl windows.
+    // Pings /health every 10 minutes. Does NOT prevent sleep if no external traffic hits the server
+    // for >15 min — for that, use an external monitor (UptimeRobot free tier, pinging /health every 5 min).
+    const SELF_URL = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || '').replace(/\/$/, '');
+    if (SELF_URL && process.env.NODE_ENV === 'production') {
+      const https = require('https');
+      const http  = require('http');
+      setInterval(() => {
+        const url  = `${SELF_URL}/health`;
+        const lib  = url.startsWith('https') ? https : http;
+        const req  = lib.get(url, (res) => {
+          logger.debug(`[KeepAlive] /health → ${res.statusCode}`);
+        });
+        req.on('error', (e) => logger.warn(`[KeepAlive] ping failed: ${e.message}`));
+        req.end();
+      }, 10 * 60 * 1000); // every 10 minutes
+      logger.info(`[KeepAlive] Self-ping active → ${SELF_URL}/health every 10 min`);
+    }
   });
 }
 

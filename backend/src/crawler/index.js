@@ -219,8 +219,20 @@ async function processProduct(url, platform, stats) {
   logger.debug(`[Scrape] ${platform} → ${url}`);
 
   try {
-    const product = await scrapeProduct(url);
-    urlCache.set(url); // Mark as scraped (TTL applies)
+    // Retry once on scrape failure (Puppeteer flakiness, network timeout)
+    let product = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        product = await scrapeProduct(url);
+        break;
+      } catch (scrapeErr) {
+        if (attempt === 2) throw scrapeErr;
+        logger.warn(`[Scrape] Attempt ${attempt} failed for ${url}: ${scrapeErr.message} — retrying`);
+        await sleep(3000);
+      }
+    }
+
+    urlCache.set(url);
 
     stats.productsScanned++;
     global.dealsScraped = (global.dealsScraped || 0) + 1;
@@ -229,7 +241,7 @@ async function processProduct(url, platform, stats) {
     metrics.increment(`scrape.${platform}.success`);
 
     if (!product || !product.title) {
-      logger.warn(`No data returned for ${url}`);
+      logger.warn(`[Scrape] No data returned for ${url}`);
       stats.errors++;
       return;
     }

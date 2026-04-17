@@ -1,94 +1,85 @@
 /**
- * Singleton Browser + Page Pool Manager
+ * Singleton Browser Manager
  *
- * - One browser process shared across all scrapers
- * - Page pool prevents tab sprawl under high concurrency
- * - Automatic relaunch on crash
- * - Stealth headers baked in
+ * Resolves Chrome in this order:
+ *   1. PUPPETEER_EXECUTABLE_PATH env var (explicit override)
+ *   2. puppeteer.executablePath()  (bundled Chromium, downloaded at npm install)
+ *
+ * Never hardcodes /usr/bin/google-chrome-stable — that only exists when
+ * apt-get install google-chrome-stable ran, which Render does not allow.
  */
 
 const puppeteer = require('puppeteer');
-const path      = require('path');
-const fs        = require('fs');
 const logger    = require('../../utils/logger');
-
-// Resolve Chrome executable for production (Render) vs local dev.
-// Priority: PUPPETEER_EXECUTABLE_PATH env → known Render path → bundled Chromium
-function resolveExecutablePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    logger.info(`[Browser] Using PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
-
-  // Common system Chrome paths on Render (Ubuntu)
-  const candidates = [
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      logger.info(`[Browser] Found system Chrome: ${p}`);
-      return p;
-    }
-  }
-
-  logger.info('[Browser] Using bundled Chromium (local dev)');
-  return undefined; // puppeteer uses its own bundled Chromium
-}
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
 ];
 
+// Critical flags for running in containerised/restricted environments (Render, Docker, etc.)
 const LAUNCH_ARGS = [
   '--no-sandbox',
   '--disable-setuid-sandbox',
-  '--disable-dev-shm-usage',
+  '--disable-dev-shm-usage',   // use /tmp instead of /dev/shm (small in containers)
   '--disable-gpu',
+  '--no-zygote',               // prevents privileged zygote process (required on Render)
+  '--single-process',          // avoids forking issues in restricted containers
+  '--disable-extensions',
+  '--disable-background-networking',
   '--window-size=1366,768',
   '--disable-blink-features=AutomationControlled',
-  '--disable-features=IsolateOrigins,site-per-process',
-  '--disable-web-security',
 ];
 
-let _browser = null;
+let _browser       = null;
 let _launchPromise = null;
+
+function getExecutablePath() {
+  // Explicit override (e.g. set in Render dashboard pointing to a known Chrome)
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  // Bundled Chromium downloaded by puppeteer during npm install
+  try {
+    return puppeteer.executablePath();
+  } catch {
+    return undefined;
+  }
+}
 
 async function getBrowser() {
   if (_browser && _browser.isConnected()) return _browser;
   if (_launchPromise) return _launchPromise;
 
-  const executablePath =
-    process.env.PUPPETEER_EXECUTABLE_PATH || resolveExecutablePath() || '/usr/bin/google-chrome-stable';
-  logger.info(`[Browser] Launching Puppeteer... executablePath=${executablePath}`);
+  const executablePath = getExecutablePath();
+  logger.info(`[Browser] Launching — executablePath: ${executablePath || 'not resolved'}`);
 
   _launchPromise = puppeteer
     .launch({
-      headless: 'new',
+      headless:        'new',
       executablePath,
-      args: LAUNCH_ARGS,
+      args:            LAUNCH_ARGS,
       defaultViewport: { width: 1366, height: 768 },
+      timeout:         30000,
     })
     .then((browser) => {
-      _browser = browser;
+      _browser       = browser;
       _launchPromise = null;
 
       browser.on('disconnected', () => {
-        logger.warn('Browser disconnected — will relaunch on next request');
+        logger.warn('[Browser] Disconnected — will relaunch on next request');
         _browser = null;
       });
 
-      logger.info('Browser launched');
+      logger.info('[Browser] Launched OK');
       return browser;
     })
     .catch((err) => {
       _launchPromise = null;
+      logger.error(`[Browser] Launch FAILED: ${err.message}`);
+      logger.error('[Browser] If on Render: ensure PUPPETEER_SKIP_CHROMIUM_DOWNLOAD is NOT set');
       throw err;
     });
 
@@ -97,22 +88,17 @@ async function getBrowser() {
 
 async function closeBrowser() {
   if (_browser) {
-    await _browser.close().catch((e) => logger.warn('Browser close error:', e.message));
+    await _browser.close().catch((e) => logger.warn('[Browser] Close error:', e.message));
     _browser = null;
   }
 }
 
 /**
- * Opens a stealth page with optional resource blocking.
- * Always call page.close() after use.
- *
- * @param {object} opts
- * @param {boolean} opts.blockAssets  Block images/fonts/media (default true on retry)
- * @param {string}  opts.ua           Override user-agent
+ * Opens a stealth page. Always call page.close() after use.
  */
 async function openPage({ blockAssets = false, ua = null } = {}) {
   const browser = await getBrowser();
-  const page = await browser.newPage();
+  const page    = await browser.newPage();
 
   await page.setUserAgent(ua || randomAgent());
   await page.setExtraHTTPHeaders({
@@ -120,7 +106,6 @@ async function openPage({ blockAssets = false, ua = null } = {}) {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
   });
 
-  // Mask automation signals
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     window.chrome = { runtime: {} };
@@ -144,9 +129,7 @@ function randomAgent() {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function randomDelay(min = 1500, max = 4000) {
   return sleep(min + Math.floor(Math.random() * (max - min)));

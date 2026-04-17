@@ -3,23 +3,22 @@ services:
     name: deal-system-backend
     runtime: node
     rootDir: backend
-    buildCommand: |
-      apt-get update
-      apt-get install -y wget gnupg
-      wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
-      echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
-      apt-get update
-      apt-get install -y google-chrome-stable
-      npm install
+    buildCommand: bash ../render-build.sh
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: /usr/bin/google-chrome-stable
-      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-        value: "true"
       - key: PORT
         value: "5000"
-      # Set these as secrets in Render dashboard:
-      # MONGODB_URI, TELEGRAM_TOKEN, TELEGRAM_CHAT, JWT_SECRET, ALLOWED_ORIGINS
+      # ── DO NOT set PUPPETEER_EXECUTABLE_PATH or PUPPETEER_SKIP_CHROMIUM_DOWNLOAD ──
+      # Puppeteer downloads its own Chromium during npm install.
+      # Setting those vars breaks it when apt-get Chrome is not installed.
+      #
+      # Set these in Render dashboard as secrets:
+      # MONGODB_URI      = mongodb+srv://...
+      # TELEGRAM_TOKEN   = 123456:ABC...
+      # TELEGRAM_CHAT    = -100xxxxxxxxxx
+      # JWT_SECRET       = <random 32+ char string>
+      # ALLOWED_ORIGINS  = https://your-app.vercel.app
+      # AUTO_MODE_DEFAULT = true
+      # CRON_SCHEDULE    = */5 * * * *

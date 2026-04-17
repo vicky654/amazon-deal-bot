@@ -20,17 +20,42 @@ function checkEnvVar(name) {
 }
 
 function checkChrome() {
-  const paths = [
-    process.env.PUPPETEER_EXECUTABLE_PATH,
+  const puppeteer = require('puppeteer');
+
+  const candidates = [];
+
+  // 1. Explicit env override
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    candidates.push({ path: process.env.PUPPETEER_EXECUTABLE_PATH, source: 'env' });
+  }
+
+  // 2. Bundled Chromium (downloaded by npm install — the correct path on Render)
+  try {
+    const bundled = puppeteer.executablePath();
+    if (bundled) candidates.push({ path: bundled, source: 'bundled' });
+  } catch { /* puppeteer not available */ }
+
+  // 3. System Chrome fallbacks (only present if apt-get ran, which Render doesn't allow)
+  for (const p of [
     '/usr/bin/google-chrome-stable',
     '/usr/bin/google-chrome',
     '/usr/bin/chromium-browser',
     '/usr/bin/chromium',
-  ].filter(Boolean);
-  for (const p of paths) {
-    if (fs.existsSync(p)) return { found: true, path: p };
+  ]) {
+    candidates.push({ path: p, source: 'system' });
   }
-  return { found: false, path: null };
+
+  for (const { path: p, source } of candidates) {
+    if (p && fs.existsSync(p)) return { found: true, path: p, source };
+  }
+
+  return {
+    found:   false,
+    path:    null,
+    source:  null,
+    checked: candidates.map((c) => c.path),
+    hint:    'PUPPETEER_SKIP_CHROMIUM_DOWNLOAD must NOT be set — delete it from Render env vars',
+  };
 }
 
 router.get('/crawler', async (req, res) => {
