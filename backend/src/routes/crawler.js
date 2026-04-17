@@ -36,12 +36,13 @@ router.post('/start', async (req, res) => {
 
   res.json({ success: true, message: 'Crawl cycle started' });
 
-  // Fire and forget — don't block the HTTP response
   _running = true;
-  runCrawlCycle()
-    .then((stats) => logger.info(`[API] Manual crawl done: ${JSON.stringify(stats)}`))
-    .catch((err) => logger.error(`[API] Manual crawl failed: ${err.message}`))
-    .finally(() => { _running = false; });
+  setImmediate(() => {
+    runCrawlCycle()
+      .then((stats) => logger.info(`[API] Manual crawl done: ${JSON.stringify(stats)}`))
+      .catch((err) => logger.error(`[API] Manual crawl failed: ${err.message}`))
+      .finally(() => { _running = false; });
+  });
 });
 
 router.post('/stop', (req, res) => {

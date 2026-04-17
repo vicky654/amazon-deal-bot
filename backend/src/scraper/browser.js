@@ -8,7 +8,35 @@
  */
 
 const puppeteer = require('puppeteer');
-const logger = require('../../utils/logger');
+const path      = require('path');
+const fs        = require('fs');
+const logger    = require('../../utils/logger');
+
+// Resolve Chrome executable for production (Render) vs local dev.
+// Priority: PUPPETEER_EXECUTABLE_PATH env → known Render path → bundled Chromium
+function resolveExecutablePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    logger.info(`[Browser] Using PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
+  // Common system Chrome paths on Render (Ubuntu)
+  const candidates = [
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      logger.info(`[Browser] Found system Chrome: ${p}`);
+      return p;
+    }
+  }
+
+  logger.info('[Browser] Using bundled Chromium (local dev)');
+  return undefined; // puppeteer uses its own bundled Chromium
+}
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -36,11 +64,14 @@ async function getBrowser() {
   if (_browser && _browser.isConnected()) return _browser;
   if (_launchPromise) return _launchPromise;
 
-  logger.info('Launching Puppeteer browser...');
+  const executablePath =
+    process.env.PUPPETEER_EXECUTABLE_PATH || resolveExecutablePath() || '/usr/bin/google-chrome-stable';
+  logger.info(`[Browser] Launching Puppeteer... executablePath=${executablePath}`);
 
   _launchPromise = puppeteer
     .launch({
       headless: 'new',
+      executablePath,
       args: LAUNCH_ARGS,
       defaultViewport: { width: 1366, height: 768 },
     })

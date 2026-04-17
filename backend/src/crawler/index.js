@@ -54,8 +54,21 @@ const scrapeQueue = getScrapeQueue();
 // ─── CRAWL CYCLE ──────────────────────────────────────────────────────────────
 
 async function runCrawlCycle() {
-  _stopFlag    = false; // reset for new cycle
+  _stopFlag    = false;
   const startedAt = Date.now();
+
+  // Global tracking — readable by /api/debug/crawler
+  global.crawlerRunning   = true;
+  global.lastCrawlerRun   = new Date().toISOString();
+  global.dealsScraped     = 0;
+  global.dealsPosted      = 0;
+  global.lastCrawlerError = null;
+
+  logger.info('[Crawler] ══ runCrawlCycle START ══');
+  logger.info(`[Crawler] AUTO_MODE=${autoMode.state.enabled} | PUBLIC_URL=${PUBLIC_URL}`);
+  logger.info(`[Crawler] TELEGRAM_TOKEN=${process.env.TELEGRAM_TOKEN ? process.env.TELEGRAM_TOKEN.slice(0,8)+'…' : 'NOT SET'}`);
+  logger.info(`[Crawler] TELEGRAM_CHAT=${process.env.TELEGRAM_CHAT || 'NOT SET'}`);
+  logger.info(`[Crawler] MONGODB_URI=${process.env.MONGODB_URI ? 'set' : 'NOT SET'}`);
 
   const run = await CrawlerRun.create({
     status:    'running',
@@ -132,7 +145,13 @@ async function runCrawlCycle() {
     }
 
     const totalFresh = Object.values(urlsByPlatform).reduce((s, a) => s + a.length, 0);
-    logger.info(`Phase 1 complete — ${totalFresh} fresh URLs queued`);
+    logger.info(`[Crawler] Phase 1 complete — ${totalFresh} fresh URLs queued`);
+    for (const [plat, urls] of Object.entries(urlsByPlatform)) {
+      logger.info(`[Crawler]   ${plat}: ${urls.length} URLs`);
+    }
+    if (totalFresh === 0) {
+      logger.warn('[Crawler] ⚠️  0 fresh URLs found — bot detection or empty categories. Nothing to scrape.');
+    }
 
     // ── Phase 2: Scrape + filter + post ──────────────────────────────────────
     logger.info('Phase 2 starting — scraping');
@@ -165,6 +184,7 @@ async function runCrawlCycle() {
     metrics.increment('crawl.cycles');
     metrics.gauge('crawl.last_deals_found', stats.dealsFound);
 
+    global.crawlerRunning = false;
     logger.info(
       `═══ Crawl complete (${Math.round(durationMs / 1000)}s) ═══ ` +
       `scanned=${stats.productsScanned} deals=${stats.dealsFound} posted=${stats.dealsPosted} errors=${stats.errors}`
@@ -173,6 +193,9 @@ async function runCrawlCycle() {
     return stats;
   } catch (error) {
     const durationMs = Date.now() - startedAt;
+
+    global.crawlerRunning   = false;
+    global.lastCrawlerError = error.message;
 
     await CrawlerRun.findByIdAndUpdate(run._id, {
       status:     'failed',
@@ -193,13 +216,14 @@ async function runCrawlCycle() {
 
 async function processProduct(url, platform, stats) {
   const t0 = Date.now();
+  logger.debug(`[Scrape] ${platform} → ${url}`);
 
   try {
-    // Scrape
     const product = await scrapeProduct(url);
     urlCache.set(url); // Mark as scraped (TTL applies)
 
     stats.productsScanned++;
+    global.dealsScraped = (global.dealsScraped || 0) + 1;
     if (stats.byPlatform[platform]) stats.byPlatform[platform].scraped++;
     metrics.observe('scrape.duration_ms', Date.now() - t0);
     metrics.increment(`scrape.${platform}.success`);
@@ -242,9 +266,9 @@ async function processProduct(url, platform, stats) {
     const { allow, reason: postReason } = shouldPostDeal(product, deal);
 
     if (!autoMode.state.enabled) {
-      logger.info(`Auto Mode OFF — deal saved but NOT posted: ${deal.asin || deal._id}`);
+      logger.warn(`[Crawler] ⛔ AUTO MODE IS OFF — deal saved but NOT posted to Telegram: "${deal.title?.slice(0,50)}"`);
     } else if (!scoreMet) {
-      logger.info(`Score too low (${deal.score}/${MIN_SCORE}) — saved but NOT posted: ${deal.asin || deal._id}`);
+      logger.warn(`[Crawler] ⛔ Score too low (${deal.score} < ${MIN_SCORE}) — NOT posted: "${deal.title?.slice(0,50)}"`);
     } else if (!allow) {
       emit('crawler:deal-skipped', {
         type:     'skipped',
@@ -256,6 +280,7 @@ async function processProduct(url, platform, stats) {
       logger.info(`Smart rule blocked [${postReason}]: "${deal.title.slice(0, 50)}"`);
     } else {
       try {
+        logger.info(`[Crawler] 📤 Posting to Telegram: "${deal.title?.slice(0,50)}" price=₹${deal.price} discount=${deal.discount}%`);
         await postDealToTelegram(deal);
         const now = new Date();
         await Deal.findByIdAndUpdate(deal._id, {
@@ -267,6 +292,7 @@ async function processProduct(url, platform, stats) {
           'steps.telegram.at':   now,
         });
         stats.dealsPosted++;
+        global.dealsPosted = (global.dealsPosted || 0) + 1;
         metrics.increment(`deals.${platform}.posted`);
         emit('crawler:deal-posted', {
           type:     'posted',

@@ -13,20 +13,19 @@ let bot = null;
 
 // ── Startup validation ────────────────────────────────────────────────────────
 if (!TOKEN) {
-  logger.warn('TELEGRAM_TOKEN missing — Telegram posting disabled');
+  logger.error('[Telegram] ❌ TELEGRAM_TOKEN is NOT SET — Telegram posting is DISABLED. Set it in Render dashboard.');
 } else if (!CHAT_ID) {
-  logger.warn('TELEGRAM_CHAT missing — Telegram posting disabled');
+  logger.error('[Telegram] ❌ TELEGRAM_CHAT is NOT SET — Telegram posting is DISABLED. Set it in Render dashboard.');
 } else {
-  // Validate chat-id format: groups/channels must start with "-"
   if (!CHAT_ID.startsWith('-')) {
     logger.warn(
-      `TELEGRAM_CHAT="${CHAT_ID}" does not start with "-". ` +
+      `[Telegram] ⚠️  TELEGRAM_CHAT="${CHAT_ID}" does not start with "-". ` +
       'Supergroups and channels require the "-100xxxxxxxxxx" format.'
     );
   }
   bot = new TelegramBot(TOKEN);
   logger.info(
-    `Telegram bot initialised — chat: ${CHAT_ID} ` +
+    `[Telegram] ✅ Bot initialised — chat: ${CHAT_ID} ` +
     `(token: ${TOKEN.slice(0, 8)}…)`
   );
 }
@@ -141,9 +140,10 @@ function escapeHtml(text) {
  */
 async function sendToTelegram(imageUrl, caption, buyLink = null) {
   if (!bot || !CHAT_ID) {
-    logger.warn('Telegram not configured — skipping post');
+    logger.error('[Telegram] ❌ sendToTelegram called but bot/chat not configured — SKIPPING. Check TELEGRAM_TOKEN and TELEGRAM_CHAT on Render.');
     return null;
   }
+  logger.info(`[Telegram] Sending deal... chat=${CHAT_ID} hasImage=${!!imageUrl}`);
 
   const replyMarkup = buyLink
     ? { inline_keyboard: [[{ text: '🛒 Buy Now', url: buyLink }]] }

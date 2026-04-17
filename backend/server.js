@@ -15,6 +15,7 @@ const healthRouter        = require('./src/routes/health');
 const earnkaroRouter      = require('./src/routes/earnkaro');
 const reelsRouter         = require('./src/routes/reels');
 const systemRouter        = require('./src/routes/system');
+const debugRouter         = require('./src/routes/debug');
 const redirectRouter      = require('./src/routes/redirect');
 const authRouter          = require('./src/routes/auth');
 const dashboardRouter     = require('./src/routes/dashboard');
@@ -170,6 +171,7 @@ app.use('/api/crawler',  crawlerRouter);
 app.use('/api/earnkaro', earnkaroRouter);
 app.use('/api/reels',    reelsRouter);
 app.use('/api/system',   systemRouter);
+app.use('/api/debug',    debugRouter);
 app.use('/',             healthRouter);
 
 // ── Legacy endpoints (frontend currently calls these) ─────────────────────────

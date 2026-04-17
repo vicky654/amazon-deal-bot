@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: deal-system-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: |
+      apt-get update
+      apt-get install -y wget gnupg
+      wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
+      echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
+      apt-get update
+      apt-get install -y google-chrome-stable
+      npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/google-chrome-stable
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "true"
+      - key: PORT
+        value: "5000"
+      # Set these as secrets in Render dashboard:
+      # MONGODB_URI, TELEGRAM_TOKEN, TELEGRAM_CHAT, JWT_SECRET, ALLOWED_ORIGINS
