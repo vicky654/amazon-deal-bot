@@ -10,9 +10,11 @@ services:
         value: production
       - key: PORT
         value: "5000"
-      # ── DO NOT set PUPPETEER_EXECUTABLE_PATH or PUPPETEER_SKIP_CHROMIUM_DOWNLOAD ──
-      # Puppeteer downloads its own Chromium during npm install.
-      # Setting those vars breaks it when apt-get Chrome is not installed.
+      # ── DELETE these from Render dashboard if they exist (they break Chromium download) ──
+      # PUPPETEER_SKIP_DOWNLOAD                      ← puppeteer v21 name (main one)
+      # PUPPETEER_SKIP_CHROME_DOWNLOAD               ← puppeteer v21 variant
+      # PUPPETEER_SKIP_CHROMIUM_DOWNLOAD             ← old puppeteer name
+      # PUPPETEER_EXECUTABLE_PATH                    ← do not point to system Chrome
       #
       # Set these in Render dashboard as secrets:
       # MONGODB_URI      = mongodb+srv://...

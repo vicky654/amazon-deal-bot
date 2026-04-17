@@ -46,9 +46,16 @@ if (missingEnv.length) {
   const fs = require('fs');
   const puppeteer = require('puppeteer');
 
-  if (process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD === 'true') {
+  // puppeteer v21 checks PUPPETEER_SKIP_DOWNLOAD (not the old PUPPETEER_SKIP_CHROMIUM_DOWNLOAD)
+  const skipVars = [
+    'PUPPETEER_SKIP_DOWNLOAD',
+    'PUPPETEER_SKIP_CHROME_DOWNLOAD',
+    'PUPPETEER_SKIP_CHROMIUM_DOWNLOAD',
+  ];
+  const activeSkip = skipVars.find((v) => process.env[v] === 'true');
+  if (activeSkip) {
     logger.error('════════════════════════════════════════════════════════');
-    logger.error('PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true is SET — Chromium was NOT downloaded.');
+    logger.error(`${activeSkip}=true is SET — Chromium was NOT downloaded.`);
     logger.error('DELETE this env var from Render dashboard, then redeploy.');
     logger.error('Scraping will return 0 results until this is fixed.');
     logger.error('════════════════════════════════════════════════════════');

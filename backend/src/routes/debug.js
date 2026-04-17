@@ -62,11 +62,18 @@ router.get('/crawler', async (req, res) => {
       AUTO_MODE_DEFAULT: checkEnvVar('AUTO_MODE_DEFAULT'),
       NODE_ENV: { set: true, preview: process.env.NODE_ENV || 'development' },
       // These must NOT be set — flagged here if someone accidentally re-adds them
+      // puppeteer v21 uses PUPPETEER_SKIP_DOWNLOAD (not the old CHROMIUM variant)
+      PUPPETEER_SKIP_DOWNLOAD: {
+        set:    !!process.env.PUPPETEER_SKIP_DOWNLOAD,
+        danger: process.env.PUPPETEER_SKIP_DOWNLOAD === 'true'
+                  ? '⛔ DELETE THIS — puppeteer v21 checks this exact name; Chromium will NOT download'
+                  : null,
+      },
       PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: {
-        set:     !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD,
-        danger:  process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD === 'true'
-                   ? '⛔ DELETE THIS — it prevents Chromium from downloading'
-                   : null,
+        set:    !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD,
+        danger: process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD === 'true'
+                  ? '⛔ DELETE THIS — old puppeteer name, still blocks download'
+                  : null,
       },
       PUPPETEER_EXECUTABLE_PATH: {
         set:    !!process.env.PUPPETEER_EXECUTABLE_PATH,
