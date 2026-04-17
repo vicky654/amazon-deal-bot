@@ -34,8 +34,10 @@ const dealSchema = new mongoose.Schema(
     discount:      { type: Number },  // percentage
     savings:       { type: Number },  // rupees saved (optional)
     image:         { type: String },
-    link:          { type: String },  // canonical product URL
-    affiliateLink: { type: String },  // affiliate URL (tag / EarnKaro)
+    link:          { type: String },  // canonical product URL (legacy — prefer originalLink)
+    originalLink:  { type: String },  // scraped product URL (always the raw platform URL)
+    affiliateLink: { type: String },  // affiliate URL (tag / EarnKaro); null if generation failed
+    finalLink:     { type: String },  // affiliateLink if available, else originalLink
     category:      { type: String, default: 'general' },
     dealType: {
       type:    String,

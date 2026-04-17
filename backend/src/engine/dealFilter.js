@@ -87,7 +87,7 @@ async function evaluateDeal(product) {
  * - Never resets `posted` flag (prevents Telegram re-posts)
  */
 async function upsertDeal(product, category, dealType, reason) {
-  const { platform, asin, title, price, originalPrice, discount, image, affiliateLink, url } = product;
+  const { platform, asin, title, price, originalPrice, discount, image, affiliateLink, url, originalLink, finalLink } = product;
 
   const priceEntry = {
     price,
@@ -105,6 +105,9 @@ async function upsertDeal(product, category, dealType, reason) {
     existing.discount      = discount      || existing.discount;
     existing.image         = image         || existing.image;
     existing.affiliateLink = affiliateLink || existing.affiliateLink;
+    existing.originalLink  = originalLink  || url || existing.originalLink;
+    existing.finalLink     = finalLink     || existing.finalLink;
+    existing.link          = url           || existing.link;
     existing.category      = category      || existing.category;
     existing.dealType      = dealType      || existing.dealType;
     existing.filterReason  = reason;
@@ -127,7 +130,9 @@ async function upsertDeal(product, category, dealType, reason) {
     originalPrice: originalPrice || null,
     discount:      discount || null,
     image:         image || null,
-    affiliateLink: affiliateLink || url,
+    affiliateLink: affiliateLink || null,
+    originalLink:  originalLink || url,
+    finalLink:     finalLink    || affiliateLink || url,
     link:          url,
     category:      category || platform,
     dealType:      dealType || 'discount',
@@ -138,7 +143,7 @@ async function upsertDeal(product, category, dealType, reason) {
     steps: {
       scrape:    { done: true,  at: new Date() },
       filter:    { done: true,  at: new Date(), reason },
-      affiliate: { done: !!(affiliateLink && affiliateLink !== url), at: new Date() },
+      affiliate: { done: !!(affiliateLink), at: new Date() },
       telegram:  { done: false },
     },
   });

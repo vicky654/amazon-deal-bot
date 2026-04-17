@@ -22,44 +22,68 @@ function fmtPrice(n) {
   return n ? `₹${Number(n).toLocaleString('en-IN')}` : null;
 }
 
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'https://deal-system-backend.onrender.com').replace(/\/$/, '');
+
 // ── AffiliateBadge ────────────────────────────────────────────────────────────
 
-function AffiliateBadge({ link, fullWidth = false }) {
+function AffiliateBadge({ deal, fullWidth = false }) {
   const [copied, setCopied] = useState(false);
+  const link = deal?.finalLink || deal?.affiliateLink || deal?.link;
   if (!link) return <span className="text-xs text-slate-600">—</span>;
 
+  const isAffiliate = !!(deal?.affiliateLink && deal.affiliateLink !== deal?.originalLink && deal.affiliateLink !== deal?.link);
+  const redirectUrl = deal?._id ? `${API_BASE}/r/${deal._id}` : link;
+
   const copy = async () => {
-    await navigator.clipboard.writeText(link).catch(() => {});
+    await navigator.clipboard.writeText(redirectUrl).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1400);
   };
 
   return (
-    <button
-      onClick={copy}
-      title={link}
-      className={`inline-flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-all active:scale-95 ${fullWidth ? 'w-full' : ''}`}
-      style={copied
-        ? { background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)', color: '#34d399' }
-        : { background: 'rgba(96,165,250,0.10)', border: '1px solid rgba(96,165,250,0.22)', color: '#60a5fa' }
-      }
+    <div className={`flex items-center gap-1.5 ${fullWidth ? 'w-full' : ''}`}>
+      {/* Link type badge */}
+      <span
+        className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+        style={isAffiliate
+          ? { background: 'rgba(16,185,129,0.12)', color: '#34d399', border: '1px solid rgba(16,185,129,0.22)' }
+          : { background: 'rgba(71,85,105,0.15)', color: '#64748b', border: '1px solid rgba(71,85,105,0.22)' }
+        }
+      >
+        {isAffiliate ? 'Aff' : 'Direct'}
+      </span>
+
+      {/* Copy redirect link */}
+      <button
+        onClick={copy}
+        title={redirectUrl}
+        className={`inline-flex items-center justify-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium transition-all active:scale-95 ${fullWidth ? 'flex-1' : ''}`}
+        style={copied
+          ? { background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)', color: '#34d399' }
+          : { background: 'rgba(96,165,250,0.10)', border: '1px solid rgba(96,165,250,0.22)', color: '#60a5fa' }
+        }
+      >
+        {copied ? (
+          <><svg className="h-3 w-3 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>Copied!</>
+        ) : (
+          <><svg className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>Link</>
+        )}
+      </button>
+    </div>
+  );
+}
+
+// ── ClicksBadge ───────────────────────────────────────────────────────────────
+
+function ClicksBadge({ clicks }) {
+  if (!clicks) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+      style={{ background: 'rgba(249,115,22,0.10)', color: '#fb923c', border: '1px solid rgba(249,115,22,0.18)' }}
     >
-      {copied ? (
-        <>
-          <svg className="h-3 w-3 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
-          </svg>
-          Copied!
-        </>
-      ) : (
-        <>
-          <svg className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
-          </svg>
-          Affiliate
-        </>
-      )}
-    </button>
+      👆 {clicks}
+    </span>
   );
 }
 
@@ -87,7 +111,6 @@ function ProductImage({ src, alt, className }) {
 // ── DealCard  (mobile ≤ sm) ───────────────────────────────────────────────────
 
 function DealCard({ deal, isLatest }) {
-  const affiliateLink = deal.affiliateLink || deal.link;
 
   return (
     <div
@@ -155,9 +178,10 @@ function DealCard({ deal, isLatest }) {
       <div className="p-3 flex flex-col gap-2">
         <div className="flex items-center justify-between text-xs text-slate-600 px-1">
           <span>{timeAgo(deal.createdAt)}</span>
+          <ClicksBadge clicks={deal.clicks} />
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <AffiliateBadge link={affiliateLink} fullWidth />
+          <AffiliateBadge deal={deal} fullWidth />
           <div className="[&>button]:w-full [&>button]:justify-center [&>button]:py-1.5 [&>button]:rounded-xl [&>button]:text-xs">
             <ReelButton deal={deal} />
           </div>
@@ -215,7 +239,7 @@ function DealRow({ deal, isLatest }) {
       </td>
 
       <td className="px-4 py-3 whitespace-nowrap">
-        <AffiliateBadge link={deal.affiliateLink || deal.link} />
+        <AffiliateBadge deal={deal} />
       </td>
 
       <td className="px-4 py-3 text-center whitespace-nowrap">
@@ -226,6 +250,10 @@ function DealRow({ deal, isLatest }) {
         ) : (
           <span className="text-xs rounded-full px-2 py-0.5" style={{ background: 'rgba(71,85,105,0.3)', color: '#64748b' }}>Pending</span>
         )}
+      </td>
+
+      <td className="px-4 py-3 text-center whitespace-nowrap">
+        <ClicksBadge clicks={deal.clicks} />
       </td>
 
       <td className="px-4 py-3 text-right text-xs text-slate-600 whitespace-nowrap">
@@ -263,7 +291,7 @@ function CardSkeleton() {
 function RowSkeleton() {
   return (
     <tr className="animate-pulse border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-      {[220, 80, 90, 80, 90, 80, 70, 80].map((w, i) => (
+      {[220, 80, 90, 80, 110, 80, 60, 70, 80].map((w, i) => (
         <td key={i} className="px-4 py-3">
           <div className="skeleton h-4 rounded-lg" style={{ width: `${w * 0.6}px` }} />
         </td>
@@ -465,8 +493,9 @@ export default function EnhancedDealsTable() {
                     <th className="px-4 py-2.5 text-left whitespace-nowrap">Platform</th>
                     <th className="px-4 py-2.5 text-right whitespace-nowrap">Price</th>
                     <th className="px-4 py-2.5 text-center whitespace-nowrap">Discount</th>
-                    <th className="px-4 py-2.5 text-left whitespace-nowrap">Affiliate</th>
+                    <th className="px-4 py-2.5 text-left whitespace-nowrap">Link</th>
                     <th className="px-4 py-2.5 text-center whitespace-nowrap">Status</th>
+                    <th className="px-4 py-2.5 text-center whitespace-nowrap">Clicks</th>
                     <th className="px-4 py-2.5 text-right whitespace-nowrap">Time</th>
                     <th className="px-4 py-2.5 text-center whitespace-nowrap">Reel</th>
                   </tr>

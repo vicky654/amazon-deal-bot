@@ -13,7 +13,7 @@
 const { CATEGORIES, buildPageUrl }   = require('./categories');
 const { extractLinksFromCategory, CATEGORY_DELAY_MIN_MS, CATEGORY_DELAY_MAX_MS } = require('./extractor');
 const { scrapeProduct }              = require('../scraper');
-const { generateAffiliateLink }      = require('../affiliate');
+const { generateFinalLink }          = require('../services/linkGenerator');
 const { evaluateDeal, upsertDeal }   = require('../engine/dealFilter');
 const { getScrapeQueue, getQueueStats, clearScrapeQueue } = require('../queue');
 const { shouldPostDeal } = require('../engine/postDecision');
@@ -25,6 +25,12 @@ const CrawlerRun                     = require('../models/CrawlerRun');
 const telegram                       = require('../../telegram');
 const logger                         = require('../../utils/logger');
 const autoMode                       = require('../autoMode');
+
+const PUBLIC_URL = (
+  process.env.PUBLIC_URL ||
+  process.env.RENDER_EXTERNAL_URL ||
+  'https://deal-system-backend.onrender.com'
+).replace(/\/$/, '');
 
 let _stopFlag = false;
 
@@ -204,16 +210,15 @@ async function processProduct(url, platform, stats) {
       return;
     }
 
-    // Generate affiliate link
+    // Generate hybrid link (affiliate with 5s timeout, fallback to original)
     const t1 = Date.now();
-    try {
-      product.affiliateLink = await generateAffiliateLink(url, platform);
-      metrics.observe('affiliate.duration_ms', Date.now() - t1);
-    } catch (affErr) {
-      logger.warn(`[Affiliate] Failed for ${url}: ${affErr.message} — using original URL`);
-      product.affiliateLink = url;
-      metrics.increment('affiliate.errors');
-    }
+    const linkResult = await generateFinalLink(url, platform);
+    product.affiliateLink = linkResult.affiliateLink;
+    product.originalLink  = linkResult.originalLink;
+    product.finalLink     = linkResult.finalLink;
+    product.isAffiliate   = linkResult.isAffiliate;
+    metrics.observe('affiliate.duration_ms', Date.now() - t1);
+    if (!linkResult.isAffiliate) metrics.increment('affiliate.fallback');
 
     // Evaluate deal
     const { shouldPost, reason, dealType } = await evaluateDeal(product);
@@ -304,18 +309,20 @@ async function postDealToTelegram(deal) {
     ajio:     '👠',
   };
 
-  const emoji   = PLATFORM_EMOJI[deal.platform] || '🛍️';
+  const emoji       = PLATFORM_EMOJI[deal.platform] || '🛍️';
+  const redirectUrl = `${PUBLIC_URL}/r/${deal._id}`;
+
   const caption = telegram.formatDealText(
     deal.title,
     deal.price,
-    deal.affiliateLink || deal.link,
+    redirectUrl,        // always use tracked redirect link
     deal.originalPrice,
     deal.discount,
     emoji,
     deal.platform,
   );
 
-  await telegram.sendToTelegram(deal.image, caption);
+  await telegram.sendToTelegram(deal.image, caption, redirectUrl);
 }
 
 module.exports = {
