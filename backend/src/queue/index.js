@@ -81,4 +81,11 @@ function getQueueStats() {
   };
 }
 
-module.exports = { getScrapeQueue, getAffiliateQueue, drainAll, getQueueStats };
+function clearScrapeQueue() {
+  if (_scrapeQueue) {
+    _scrapeQueue.clear();
+    logger.info('[ScrapeQueue] Queue cleared (stop requested)');
+  }
+}
+
+module.exports = { getScrapeQueue, getAffiliateQueue, drainAll, getQueueStats, clearScrapeQueue };

@@ -8,7 +8,7 @@
 
 const router     = require('express').Router();
 const CrawlerRun = require('../models/CrawlerRun');
-const { runCrawlCycle } = require('../crawler');
+const { runCrawlCycle, stopCrawl } = require('../crawler');
 const { getQueueStats } = require('../queue');
 const logger     = require('../../utils/logger');
 
@@ -18,9 +18,10 @@ router.get('/status', async (req, res, next) => {
   try {
     const lastRun = await CrawlerRun.findOne().sort({ startedAt: -1 }).lean();
     res.json({
-      success:   true,
-      running:   _running,
-      queues:    getQueueStats(),
+      success: true,
+      running: _running,
+      status:  _running ? 'running' : 'stopped',
+      queues:  getQueueStats(),
       lastRun,
     });
   } catch (err) {
@@ -41,6 +42,15 @@ router.post('/start', async (req, res) => {
     .then((stats) => logger.info(`[API] Manual crawl done: ${JSON.stringify(stats)}`))
     .catch((err) => logger.error(`[API] Manual crawl failed: ${err.message}`))
     .finally(() => { _running = false; });
+});
+
+router.post('/stop', (req, res) => {
+  if (!_running) {
+    return res.status(409).json({ success: false, error: 'No crawl cycle currently running', status: 'stopped' });
+  }
+  stopCrawl();
+  logger.info('[API] Crawler stop requested via API');
+  res.json({ success: true, message: 'Crawler stop requested', status: 'stopping' });
 });
 
 router.get('/runs', async (req, res, next) => {

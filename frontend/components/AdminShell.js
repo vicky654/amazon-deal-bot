@@ -5,9 +5,12 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { Menu, X, LogOut, Zap } from 'lucide-react';
 
-import Sidebar   from './Sidebar';
-import BottomNav from './BottomNav';
-import FAB       from './FAB';
+import Sidebar          from './Sidebar';
+import BottomNav        from './BottomNav';
+import FAB             from './FAB';
+import QuickActionBar  from './QuickActionBar';
+import { ToastProvider } from './ToastProvider';
+import { CrawlerProvider } from '../context/CrawlerContext';
 import { removeToken } from '../lib/auth';
 
 /* Map pathname → page title shown in mobile header */
@@ -25,6 +28,7 @@ const PAGE_TITLES = {
   '/admin/how-it-works':      'How It Works',
   '/admin/earnkaro-debug':    'EarnKaro Debug',
   '/admin/affiliate-history': 'Affiliate History',
+  '/admin/features':          'Features',
 };
 
 export default function AdminShell({ children }) {
@@ -39,6 +43,8 @@ export default function AdminShell({ children }) {
   }
 
   return (
+    <ToastProvider>
+    <CrawlerProvider>
     <div className="h-screen flex overflow-hidden bg-slate-950">
 
       {/* ── Sidebar ── */}
@@ -125,6 +131,11 @@ export default function AdminShell({ children }) {
 
       {/* FAB — mobile only */}
       <FAB className="lg:hidden" />
+
+      {/* Quick Action Bar — mobile only, above BottomNav */}
+      <QuickActionBar />
     </div>
+    </CrawlerProvider>
+    </ToastProvider>
   );
 }

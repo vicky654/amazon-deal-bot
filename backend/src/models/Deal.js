@@ -53,10 +53,12 @@ const dealSchema = new mongoose.Schema(
       telegram:  { done: { type: Boolean, default: false }, at: Date, error: String },
     },
 
-    clicks:       { type: Number, default: 0 },       // affiliate link click count
+    clicks:       { type: Number, default: 0 },
     posted:       { type: Boolean, default: false, index: true },
     postedAt:     { type: Date },
-    scheduledFor: { type: Date, default: null },   // null = post immediately
+    lastPostedAt: { type: Date },   // updated on every post (including re-posts)
+    lastPrice:    { type: Number }, // price at time of last post (for price-drop detection)
+    scheduledFor: { type: Date, default: null },
     priceHistory: {
       type:    [priceEntrySchema],
       default: [],

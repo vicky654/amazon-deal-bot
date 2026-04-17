@@ -85,6 +85,10 @@ export const crawlerApi = {
     return request('/api/crawler/start', { method: 'POST' });
   },
 
+  stop() {
+    return request('/api/crawler/stop', { method: 'POST' });
+  },
+
   runs(limit = 20) {
     return request(`/api/crawler/runs?limit=${limit}`);
   },

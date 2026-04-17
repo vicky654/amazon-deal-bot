@@ -2,14 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Plus, Package, Activity, Cpu } from 'lucide-react';
+import { LayoutDashboard, Plus, Package, Activity, SlidersHorizontal } from 'lucide-react';
 
 const NAV = [
-  { href: '/admin',          icon: LayoutDashboard, label: 'Home'    },
-  { href: '/admin/generate', icon: Plus,            label: 'Generate' },
-  { href: '/admin/deals',    icon: Package,         label: 'Deals'   },
-  { href: '/admin/crawler',  icon: Activity,        label: 'Crawler' },
-  { href: '/admin/system',   icon: Cpu,             label: 'System'  },
+  { href: '/admin',          icon: LayoutDashboard,   label: 'Home'     },
+  { href: '/admin/deals',    icon: Package,           label: 'Deals'    },
+  { href: '/admin/generate', icon: Plus,              label: 'Generate' },
+  { href: '/admin/features', icon: SlidersHorizontal, label: 'Features' },
+  { href: '/admin/crawler',  icon: Activity,          label: 'Crawler'  },
 ];
 
 export default function BottomNav() {

@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   Plus, Package, Activity, MessageSquare,
   Wallet, Info, BarChart2, ListChecks,
-  Cpu, MousePointerClick, LayoutDashboard, Bug,
+  Cpu, MousePointerClick, LayoutDashboard, Bug, SlidersHorizontal,
 } from 'lucide-react';
 
 const MENU = [
@@ -18,10 +18,11 @@ const MENU = [
   {
     section: 'Tools',
     items: [
-      { label: 'Generate Deal',     href: '/admin/generate', icon: Plus         },
-      { label: 'All Deals',         href: '/admin/deals',    icon: Package      },
-      { label: 'Crawler',           href: '/admin/crawler',  icon: Activity     },
-      { label: 'Custom Message',    href: '/admin/message',  icon: MessageSquare },
+      { label: 'Generate Deal',     href: '/admin/generate', icon: Plus               },
+      { label: 'All Deals',         href: '/admin/deals',    icon: Package            },
+      { label: 'Crawler',           href: '/admin/crawler',  icon: Activity           },
+      { label: 'Features',          href: '/admin/features', icon: SlidersHorizontal, badge: 'New' },
+      { label: 'Custom Message',    href: '/admin/message',  icon: MessageSquare      },
     ],
   },
   {

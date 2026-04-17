@@ -15,7 +15,9 @@ const { extractLinksFromCategory, CATEGORY_DELAY_MIN_MS, CATEGORY_DELAY_MAX_MS }
 const { scrapeProduct }              = require('../scraper');
 const { generateAffiliateLink }      = require('../affiliate');
 const { evaluateDeal, upsertDeal }   = require('../engine/dealFilter');
-const { getScrapeQueue, getQueueStats } = require('../queue');
+const { getScrapeQueue, getQueueStats, clearScrapeQueue } = require('../queue');
+const { shouldPostDeal } = require('../engine/postDecision');
+const { emit }           = require('../events/emitter');
 const { urlCache }                   = require('../utils/cache');
 const metrics                        = require('../utils/metrics');
 const Deal                           = require('../models/Deal');
@@ -23,6 +25,15 @@ const CrawlerRun                     = require('../models/CrawlerRun');
 const telegram                       = require('../../telegram');
 const logger                         = require('../../utils/logger');
 const autoMode                       = require('../autoMode');
+
+let _stopFlag = false;
+
+function stopCrawl() {
+  _stopFlag = true;
+  clearScrapeQueue();
+  emit('crawler:stopped', { type: 'info', reason: 'user-requested' });
+  logger.info('[Crawler] Stop requested — queue cleared');
+}
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function categoryDelay() {
@@ -37,12 +48,15 @@ const scrapeQueue = getScrapeQueue();
 // ─── CRAWL CYCLE ──────────────────────────────────────────────────────────────
 
 async function runCrawlCycle() {
+  _stopFlag    = false; // reset for new cycle
   const startedAt = Date.now();
 
   const run = await CrawlerRun.create({
     status:    'running',
     startedAt: new Date(),
   });
+
+  emit('crawler:started', { type: 'info', runId: run._id.toString() });
 
   const stats = {
     categoriesScanned: 0,
@@ -67,6 +81,7 @@ async function runCrawlCycle() {
     const urlsByPlatform = { amazon: [], flipkart: [], myntra: [], ajio: [] };
 
     for (const category of CATEGORIES) {
+      if (_stopFlag) { logger.info('[Crawler] Stop flag — exiting category loop'); break; }
       logger.info(`Scanning: [${category.platform}] ${category.name}`);
       let links = [];
 
@@ -86,6 +101,17 @@ async function runCrawlCycle() {
 
       stats.categoriesScanned++;
       stats.linksExtracted += fresh.length;
+
+      emit('crawler:progress', {
+        currentCategory:    category.name,
+        currentPlatform:    category.platform,
+        categoriesScanned:  stats.categoriesScanned,
+        totalCategories:    CATEGORIES.length,
+        linksExtracted:     stats.linksExtracted,
+        productsScanned:    stats.productsScanned,
+        dealsFound:         stats.dealsFound,
+        dealsPosted:        stats.dealsPosted,
+      });
 
       categoryStats.push({
         categoryId:   category.id,
@@ -128,6 +154,7 @@ async function runCrawlCycle() {
       categoryStats,
     });
 
+    emit('crawler:completed', { type: 'info', stats, durationMs });
     metrics.observe('crawl.duration_ms', durationMs);
     metrics.increment('crawl.cycles');
     metrics.gauge('crawl.last_deals_found', stats.dealsFound);
@@ -150,6 +177,7 @@ async function runCrawlCycle() {
       error:      error.message,
     });
 
+    emit('crawler:error', { type: 'error', message: error.message });
     logger.error(`Crawl cycle failed: ${error.message}`);
     throw error;
   }
@@ -203,34 +231,60 @@ async function processProduct(url, platform, stats) {
     // Save to DB
     const deal = await upsertDeal(product, platform, dealType, reason);
 
-    // Post to Telegram — only when Auto Mode is ON, deal is unposted, and score meets threshold
+    // Smart rules gate + Auto Mode + score check
     const MIN_SCORE = parseInt(process.env.MIN_DEAL_SCORE || '30', 10);
     const scoreMet  = (deal.score || 0) >= MIN_SCORE;
-    if (!deal.posted && autoMode.state.enabled && scoreMet) {
+    const { allow, reason: postReason } = shouldPostDeal(product, deal);
+
+    if (!autoMode.state.enabled) {
+      logger.info(`Auto Mode OFF — deal saved but NOT posted: ${deal.asin || deal._id}`);
+    } else if (!scoreMet) {
+      logger.info(`Score too low (${deal.score}/${MIN_SCORE}) — saved but NOT posted: ${deal.asin || deal._id}`);
+    } else if (!allow) {
+      emit('crawler:deal-skipped', {
+        type:     'skipped',
+        title:    deal.title.slice(0, 80),
+        platform: deal.platform || platform,
+        price:    deal.price,
+        reason:   postReason,
+      });
+      logger.info(`Smart rule blocked [${postReason}]: "${deal.title.slice(0, 50)}"`);
+    } else {
       try {
         await postDealToTelegram(deal);
+        const now = new Date();
         await Deal.findByIdAndUpdate(deal._id, {
-          posted:   true,
-          postedAt: new Date(),
+          posted:       true,
+          postedAt:     deal.postedAt || now,
+          lastPostedAt: now,
+          lastPrice:    deal.price,
           'steps.telegram.done': true,
-          'steps.telegram.at':   new Date(),
+          'steps.telegram.at':   now,
         });
         stats.dealsPosted++;
         metrics.increment(`deals.${platform}.posted`);
-        logger.info(`Posted: "${deal.title.slice(0, 50)}"`);
+        emit('crawler:deal-posted', {
+          type:     'posted',
+          title:    deal.title.slice(0, 80),
+          platform: deal.platform || platform,
+          price:    deal.price,
+          discount: deal.discount,
+          reason:   postReason,
+        });
+        logger.info(`Posted [${postReason}]: "${deal.title.slice(0, 50)}"`);
       } catch (tgErr) {
+        emit('crawler:deal-error', {
+          type:    'error',
+          title:   deal.title?.slice(0, 80),
+          platform,
+          reason:  tgErr.message,
+        });
         logger.error(`Telegram post failed for ${deal._id}: ${tgErr.message}`);
         await Deal.findByIdAndUpdate(deal._id, {
           'steps.telegram.done':  false,
           'steps.telegram.error': tgErr.message,
         }).catch(() => {});
       }
-    } else if (!autoMode.state.enabled) {
-      logger.info(`Auto Mode OFF — deal saved but NOT posted: ${deal.asin || deal._id}`);
-    } else if (!scoreMet) {
-      logger.info(`Score too low (${deal.score}/${MIN_SCORE}) — saved but NOT posted: ${deal.asin || deal._id}`);
-    } else {
-      logger.info(`Already posted: ${deal.asin || deal._id} — skipping Telegram`);
     }
   } catch (error) {
     stats.errors++;
@@ -266,5 +320,6 @@ async function postDealToTelegram(deal) {
 
 module.exports = {
   runCrawlCycle,
+  stopCrawl,
   getQueueStats,
 };

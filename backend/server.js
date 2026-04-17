@@ -10,6 +10,7 @@ const path     = require('path');
 const newCrawler          = require('./src/crawler');
 const dealsRouter         = require('./src/routes/deals');
 const crawlerRouter       = require('./src/routes/crawler');
+const eventsRouter        = require('./src/routes/events');
 const healthRouter        = require('./src/routes/health');
 const earnkaroRouter      = require('./src/routes/earnkaro');
 const reelsRouter         = require('./src/routes/reels');
@@ -163,7 +164,8 @@ cron.schedule(CRON_SCHEDULE, async () => {
 app.use('/r',             redirectRouter);     // click tracking redirects
 app.use('/api/auth',      authRouter);         // login + token verify
 app.use('/api/dashboard', verifyToken, dashboardRouter); // protected dashboard
-app.use('/api/deals',     dealsRouter);
+app.use('/api/events',   eventsRouter);
+app.use('/api/deals',    dealsRouter);
 app.use('/api/crawler',  crawlerRouter);
 app.use('/api/earnkaro', earnkaroRouter);
 app.use('/api/reels',    reelsRouter);
