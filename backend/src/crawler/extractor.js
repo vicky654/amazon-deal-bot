@@ -30,7 +30,15 @@ async function extractAmazonLinks(category, buildPageUrl) {
   const links = new Set();
   let emptyStreak = 0;
 
-  for (let page = 1; page <= category.maxPages; page++) {
+  // Randomize start page so different products surface on each run
+  const startPage = category.maxPages > 1
+    ? 1 + Math.floor(Math.random() * Math.max(1, category.maxPages - 1))
+    : 1;
+  const pageOrder = [];
+  for (let i = startPage; i <= category.maxPages; i++) pageOrder.push(i);
+  for (let i = 1; i < startPage; i++) pageOrder.push(i);
+
+  for (const page of pageOrder) {
     const url = buildPageUrl(category, page);
     try {
       const { data } = await axios.get(url, { headers: AXIOS_HEADERS, timeout: 20000 });
@@ -82,7 +90,14 @@ async function extractAmazonLinks(category, buildPageUrl) {
 async function extractFlipkartLinks(category) {
   const links = new Set();
 
-  for (let page = 1; page <= category.maxPages; page++) {
+  const startPage = category.maxPages > 1
+    ? 1 + Math.floor(Math.random() * Math.max(1, category.maxPages - 1))
+    : 1;
+  const pageOrder = [];
+  for (let i = startPage; i <= category.maxPages; i++) pageOrder.push(i);
+  for (let i = 1; i < startPage; i++) pageOrder.push(i);
+
+  for (const page of pageOrder) {
     const url = page === 1 ? category.url : `${category.url}&page=${page}`;
     try {
       const { data } = await axios.get(url, { headers: AXIOS_HEADERS, timeout: 20000 });

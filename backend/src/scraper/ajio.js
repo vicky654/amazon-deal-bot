@@ -75,13 +75,22 @@ function ajioEvaluator(titleSels, priceSels, origSels, discSels, imgSels) {
 }
 
 async function scrapeAjio(url, attempt = 1, maxAttempts = 3) {
-  const page = await openPage({ blockAssets: false }); // Ajio is SPA
+  const page = await openPage({ blockAssets: true });
 
   try {
     logger.info(`[Ajio][Attempt ${attempt}/${maxAttempts}] ${url}`);
 
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 50000 });
-    await randomDelay(2500, 5000);
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    } catch (navErr) {
+      if (navErr.message.includes('detached') || navErr.message.includes('Navigation failed')) {
+        logger.warn(`[Ajio] Nav error (${navErr.message}) — retrying`);
+        throw navErr;
+      }
+      throw navErr;
+    }
+
+    await randomDelay(2000, 4000);
 
     try {
       await page.waitForSelector(TITLE_SELECTORS[0], { timeout: 10000 });
@@ -104,7 +113,8 @@ async function scrapeAjio(url, attempt = 1, maxAttempts = 3) {
   } catch (err) {
     logger.error(`[Ajio][Attempt ${attempt}] ${err.message}`);
     if (attempt < maxAttempts) {
-      await new Promise((r) => setTimeout(r, attempt * 4000));
+      await page.close().catch(() => {});
+      await new Promise((r) => setTimeout(r, attempt * 3000));
       return scrapeAjio(url, attempt + 1, maxAttempts);
     }
     throw new Error(`Ajio scrape failed after ${maxAttempts} attempts: ${err.message}`);

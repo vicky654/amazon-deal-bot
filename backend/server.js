@@ -217,6 +217,43 @@ app.post('/generate', async (req, res, next) => {
   dealsRouter.handle(req, res, next);
 });
 
+// POST /api/test-deal — bypass scraper, send dummy deal directly to Telegram
+// If this works → scraper is broken. If this fails → Telegram config is broken.
+app.post('/api/test-deal', async (req, res) => {
+  const TOKEN   = process.env.TELEGRAM_TOKEN;
+  const CHAT_ID = process.env.TELEGRAM_CHAT;
+
+  logger.info(`[TestDeal] TOKEN=${TOKEN ? TOKEN.slice(0, 8) + '…' : 'NOT SET'} CHAT_ID=${CHAT_ID || 'NOT SET'}`);
+
+  if (!TOKEN || !CHAT_ID) {
+    return res.status(500).json({
+      ok:      false,
+      error:   'Telegram not configured',
+      TOKEN:   TOKEN ? `${TOKEN.slice(0, 8)}…` : 'NOT SET',
+      CHAT_ID: CHAT_ID || 'NOT SET',
+    });
+  }
+
+  try {
+    const caption = telegram.formatDealText(
+      'DealBot Health Check — Test Product',
+      999,
+      'https://www.amazon.in',
+      1999,
+      50,
+      '🔥',
+      'amazon',
+    );
+    logger.info(`[TestDeal] Sending dummy deal → chat=${CHAT_ID}`);
+    await telegram.sendToTelegram(null, caption, 'https://www.amazon.in');
+    logger.info('[TestDeal] ✅ Dummy deal sent successfully');
+    res.json({ ok: true, message: 'Test deal sent to Telegram', chatId: CHAT_ID });
+  } catch (err) {
+    logger.error(`[TestDeal] ❌ Telegram FAILED: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message, chatId: CHAT_ID });
+  }
+});
+
 // POST /telegram — send arbitrary deal to Telegram
 app.post('/telegram', async (req, res) => {
   try {
@@ -295,7 +332,8 @@ if (require.main === module) {
     logger.info(`Cron: ${CRON_SCHEDULE} (interval ~${parseIntervalMinutes(CRON_SCHEDULE)} min)`);
     logger.info(`CORS: ${rawOrigins ? `restricted to ${rawOrigins}` : 'open (*)'}`);
     telegram.sendTestMessage().catch(() => {});
-    earnkaroAutoRefresh.start();
+    // EarnKaro auto-refresh disabled — scraper is Amazon-only (no EarnKaro needed)
+    // earnkaroAutoRefresh.start();
 
     // Keep-alive self-ping — prevents Render free tier from sleeping during active crawl windows.
     // Pings /health every 10 minutes. Does NOT prevent sleep if no external traffic hits the server

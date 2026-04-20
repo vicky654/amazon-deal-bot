@@ -21,8 +21,10 @@ const { scrapeMyntra }   = require('./myntra');
 const { scrapeAjio }     = require('./ajio');
 const logger             = require('../../utils/logger');
 
+const AMAZON_RE = /amazon\.(in|com)/i;
+
 const PLATFORM_MAP = [
-  { pattern: /amazon\.(in|com)/i,  platform: 'amazon',   fn: scrapeAmazon   },
+  { pattern: AMAZON_RE,            platform: 'amazon',   fn: scrapeAmazon   },
   { pattern: /flipkart\.com/i,     platform: 'flipkart', fn: scrapeFlipkart },
   { pattern: /myntra\.com/i,       platform: 'myntra',   fn: scrapeMyntra   },
   { pattern: /ajio\.com/i,         platform: 'ajio',     fn: scrapeAjio     },
@@ -36,12 +38,17 @@ function detectPlatform(url) {
 }
 
 /**
- * Scrape any supported product URL.
+ * Scrape a product URL. Only Amazon URLs are processed; all others return null.
  *
  * @param {string} url
- * @returns {Promise<object>} Standardised deal object
+ * @returns {Promise<object|null>} Standardised deal object, or null for non-Amazon
  */
 async function scrapeProduct(url) {
+  if (!AMAZON_RE.test(url)) {
+    logger.debug(`[Scraper] Non-Amazon URL skipped: ${url}`);
+    return null;
+  }
+
   const entry = detectPlatform(url);
   if (!entry) throw new Error(`Unsupported platform for URL: ${url}`);
 

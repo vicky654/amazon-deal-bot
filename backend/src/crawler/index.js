@@ -11,12 +11,62 @@
  */
 
 const { CATEGORIES, buildPageUrl }   = require('./categories');
+
+// ── Allowed category keywords (product-level safety net) ─────────────────────
+// Primary filtering is done at source (categories.js URLs/nodes).
+// This is a secondary check on the scraped product's own category string.
+const ALLOWED_CATEGORY_KEYWORDS = [
+  // Electronics / Gadgets
+  'mobile', 'phone', 'smartphone', 'laptop', 'computer', 'tablet',
+  'headphone', 'earphone', 'earbud', 'speaker', 'audio', 'smartwatch',
+  'wearable', 'camera', 'television', 'tv', 'monitor', 'gadget', 'electronic',
+  'charger', 'power bank', 'keyboard', 'mouse',
+
+  // Shoes / Footwear
+  'shoe', 'shoes', 'footwear', 'sneaker', 'sandal', 'slipper', 'boot',
+  'heel', 'loafer', 'flip flop', 'sport shoe', 'running shoe',
+
+  // Clothing / Fashion
+  'clothing', 'fashion', 'apparel', 'shirt', 'kurta', 'dress', 'saree',
+  'jeans', 'trouser', 'jacket', 'hoodie', 'sweatshirt', 'top', 'tshirt',
+  't-shirt', 'legging', 'skirt', 'ethnic', 'western', 'suit', 'blazer',
+
+  // Makeup / Beauty
+  'beauty', 'makeup', 'cosmetic', 'lipstick', 'foundation', 'skincare',
+  'moisturizer', 'serum', 'shampoo', 'conditioner', 'perfume', 'fragrance',
+  'hair', 'face wash', 'sunscreen', 'cream', 'lotion', 'grooming',
+
+  // Gym / Fitness
+  'fitness', 'gym', 'sport', 'sports', 'yoga', 'dumbbell', 'weight',
+  'protein', 'supplement', 'cycling', 'treadmill', 'exercise', 'workout',
+];
+
+const BLOCKED_CATEGORY_KEYWORDS = [
+  'book', 'books', 'novel', 'textbook', 'grocery', 'food', 'vegetable',
+  'fruit', 'snack', 'beverage', 'kitchen', 'cookware', 'utensil',
+  'toy', 'baby', 'diaper', 'stationery', 'automotive', 'tyre', 'car',
+  'furniture', 'mattress', 'curtain', 'bedsheet', 'pillow', 'tool',
+  'hardware', 'pet', 'garden', 'plant', 'seed',
+];
+
+function isAllowedCategory(product) {
+  const raw = ((product.category || '') + ' ' + (product.title || '')).toLowerCase().trim();
+
+  // Blocked wins — skip even if an allowed keyword also matches
+  if (BLOCKED_CATEGORY_KEYWORDS.some((k) => raw.includes(k))) return false;
+
+  // If category field is empty, let it through (platform-level filtering is sufficient)
+  if (!product.category) return true;
+
+  return ALLOWED_CATEGORY_KEYWORDS.some((k) => raw.includes(k));
+}
 const { extractLinksFromCategory, CATEGORY_DELAY_MIN_MS, CATEGORY_DELAY_MAX_MS } = require('./extractor');
 const { scrapeProduct }              = require('../scraper');
 const { generateFinalLink }          = require('../services/linkGenerator');
 const { evaluateDeal, upsertDeal }   = require('../engine/dealFilter');
 const { getScrapeQueue, getQueueStats, clearScrapeQueue } = require('../queue');
-const { shouldPostDeal } = require('../engine/postDecision');
+const { shouldPostDeal, isBook, normalizeTitle } = require('../engine/postDecision');
+const { normalizeProduct, extractBrand, isAlreadyPosted, markAsPosted } = require('../engine/dedup');
 const { emit }           = require('../events/emitter');
 const { urlCache }                   = require('../utils/cache');
 const metrics                        = require('../utils/metrics');
@@ -32,7 +82,12 @@ const PUBLIC_URL = (
   'https://deal-system-backend.onrender.com'
 ).replace(/\/$/, '');
 
-let _stopFlag = false;
+const MAX_BRAND_PER_CYCLE = parseInt(process.env.MAX_BRAND_PER_CYCLE || '2', 10);
+
+let _stopFlag            = false;
+let _seenTitles          = new Set();
+let _seenBrands          = new Map();  // brand → post count this cycle
+let _forceSentFirstDeal  = false; // reset each cycle; used by FORCE_FIRST_DEAL=true
 
 function stopCrawl() {
   _stopFlag = true;
@@ -54,7 +109,10 @@ const scrapeQueue = getScrapeQueue();
 // ─── CRAWL CYCLE ──────────────────────────────────────────────────────────────
 
 async function runCrawlCycle() {
-  _stopFlag    = false;
+  _stopFlag           = false;
+  _seenTitles         = new Set();
+  _seenBrands         = new Map();
+  _forceSentFirstDeal = false;
   const startedAt = Date.now();
 
   // Global tracking — readable by /api/debug/crawler
@@ -99,7 +157,10 @@ async function runCrawlCycle() {
     // ── Phase 1: Extract links from all categories ────────────────────────────
     const urlsByPlatform = { amazon: [], flipkart: [], myntra: [], ajio: [] };
 
-    for (const category of CATEGORIES) {
+    // Shuffle categories each cycle so different products surface each run
+    const shuffledCategories = [...CATEGORIES].sort(() => Math.random() - 0.5);
+
+    for (const category of shuffledCategories) {
       if (_stopFlag) { logger.info('[Crawler] Stop flag — exiting category loop'); break; }
       logger.info(`Scanning: [${category.platform}] ${category.name}`);
       let links = [];
@@ -216,7 +277,7 @@ async function runCrawlCycle() {
 
 async function processProduct(url, platform, stats) {
   const t0 = Date.now();
-  logger.debug(`[Scrape] ${platform} → ${url}`);
+  logger.info(`[Scrape] ▶ START ${platform} → ${url}`);
 
   try {
     // Retry once on scrape failure (Puppeteer flakiness, network timeout)
@@ -226,8 +287,8 @@ async function processProduct(url, platform, stats) {
         product = await scrapeProduct(url);
         break;
       } catch (scrapeErr) {
+        logger.error(`[Scrape] ❌ Attempt ${attempt} FAILED for ${url}: ${scrapeErr.message}${attempt < 2 ? ' — retrying in 3s' : ' — giving up'}`);
         if (attempt === 2) throw scrapeErr;
-        logger.warn(`[Scrape] Attempt ${attempt} failed for ${url}: ${scrapeErr.message} — retrying`);
         await sleep(3000);
       }
     }
@@ -240,9 +301,77 @@ async function processProduct(url, platform, stats) {
     metrics.observe('scrape.duration_ms', Date.now() - t0);
     metrics.increment(`scrape.${platform}.success`);
 
-    if (!product || !product.title) {
-      logger.warn(`[Scrape] No data returned for ${url}`);
+    if (!product || !product.title || !product.price) {
+      logger.warn(`[Scrape] Skipped: missing data — title=${!!product?.title} price=${!!product?.price} url=${url}`);
       stats.errors++;
+      return;
+    }
+
+    logger.info(`[Scrape] SCRAPED OK → title="${product.title.slice(0, 60)}" price=₹${product.price ?? 'N/A'} discount=${product.discount ?? 'N/A'}%`);
+
+    // ── FORCE_FIRST_DEAL bypass (set env var for testing only) ───────────────
+    if (process.env.FORCE_FIRST_DEAL === 'true' && !_forceSentFirstDeal && product.title && product.price) {
+      _forceSentFirstDeal = true;
+      logger.info(`[FORCE] Bypassing all filters — sending first valid scrape: "${product.title.slice(0, 60)}"`);
+      try {
+        const forced  = await generateFinalLink(url, platform);
+        const caption = telegram.formatDealText(
+          product.title, product.price, forced.finalLink,
+          product.originalPrice, product.discount, null, platform,
+        );
+        await telegram.sendToTelegram(product.image, caption, forced.finalLink);
+        logger.info('[FORCE] ✅ Forced deal sent to Telegram successfully');
+      } catch (forceErr) {
+        logger.error(`[FORCE] ❌ Forced send FAILED: ${forceErr.message}`);
+      }
+      return;
+    }
+
+    // ── EARLY GATE 0: Category allowlist ─────────────────────────────────────
+    // Only process: Electronics, Shoes, Clothing, Beauty, Fitness.
+    // Blocks grocery, books, kitchen, toys, automotive, etc.
+    if (!isAllowedCategory(product)) {
+      logger.info(`[Filter] Skipped category "${product.category || 'unknown'}": "${product.title.slice(0, 60)}"`);
+      metrics.increment('filter.category_skip');
+      return;
+    }
+
+    // ── EARLY GATE 1: Book filter ─────────────────────────────────────────────
+    if (isBook(product)) {
+      logger.info(`[Filter] Skipped book item: "${product.title.slice(0, 60)}"`);
+      metrics.increment('filter.book_skip');
+      return;
+    }
+
+    // ── EARLY GATE 2: Title deduplication ────────────────────────────────────
+    // In-memory Set catches duplicates within the current crawl cycle.
+    // URL dedup (urlCache) already handles exact URL repeats; this catches
+    // same product appearing under different URLs (e.g. variant pages).
+    const titleKey = normalizeTitle(product.title);
+    if (_seenTitles.has(titleKey)) {
+      logger.info(`[Filter] Skipped duplicate: "${product.title.slice(0, 60)}"`);
+      metrics.increment('filter.duplicate_skip');
+      return;
+    }
+    _seenTitles.add(titleKey);
+
+    // ── EARLY GATE 3: 5-day PostedLog duplicate check ────────────────────────
+    // Uses compound (productId, platform) index — survives pruneOldDeals.
+    // Fails open on DB error so infra flakiness never silences legitimate deals.
+    const { productId } = normalizeProduct(product);
+    if (await isAlreadyPosted(productId, platform)) {
+      logger.info(`[Filter] Skipped duplicate (5-day log) [${productId}]: "${product.title.slice(0, 60)}"`);
+      metrics.increment('filter.db_duplicate_skip');
+      return;
+    }
+
+    // ── EARLY GATE 4: Brand frequency cap ────────────────────────────────────
+    // Limits same brand to MAX_BRAND_PER_CYCLE posts per crawl cycle.
+    const brand     = extractBrand(product.title);
+    const brandHits = _seenBrands.get(brand) || 0;
+    if (brandHits >= MAX_BRAND_PER_CYCLE) {
+      logger.info(`[Filter] Brand cap (${brand} × ${brandHits}): "${product.title.slice(0, 60)}"`);
+      metrics.increment('filter.brand_cap_skip');
       return;
     }
 
@@ -291,8 +420,13 @@ async function processProduct(url, platform, stats) {
       });
       logger.info(`Smart rule blocked [${postReason}]: "${deal.title.slice(0, 50)}"`);
     } else {
+      if (!deal.title || !deal.price) {
+        logger.warn(`[Telegram] SKIPPED INVALID DEAL — missing title or price | id=${deal._id} title=${deal.title ?? 'null'} price=${deal.price ?? 'null'}`);
+        return;
+      }
+
+      logger.info(`[Telegram] SENDING TO TELEGRAM: "${deal.title?.slice(0, 60)}" | price=₹${deal.price} discount=${deal.discount}% chat=${process.env.TELEGRAM_CHAT}`);
       try {
-        logger.info(`[Crawler] 📤 Posting to Telegram: "${deal.title?.slice(0,50)}" price=₹${deal.price} discount=${deal.discount}%`);
         await postDealToTelegram(deal);
         const now = new Date();
         await Deal.findByIdAndUpdate(deal._id, {
@@ -303,9 +437,16 @@ async function processProduct(url, platform, stats) {
           'steps.telegram.done': true,
           'steps.telegram.at':   now,
         });
+        // Write to PostedLog — idempotent upsert, retries once, logs CRITICAL on failure
+        const { productId: postedProductId } = normalizeProduct(deal);
+        await markAsPosted(postedProductId, deal.platform || platform, normalizeTitle(deal.title));
+        // Increment brand counter for this cycle
+        const postedBrand = extractBrand(deal.title);
+        _seenBrands.set(postedBrand, (_seenBrands.get(postedBrand) || 0) + 1);
         stats.dealsPosted++;
         global.dealsPosted = (global.dealsPosted || 0) + 1;
         metrics.increment(`deals.${platform}.posted`);
+        logger.info(`[Telegram] ✅ SENT OK — "${deal.title.slice(0, 50)}" [${postReason}]`);
         emit('crawler:deal-posted', {
           type:     'posted',
           title:    deal.title.slice(0, 80),
@@ -314,15 +455,15 @@ async function processProduct(url, platform, stats) {
           discount: deal.discount,
           reason:   postReason,
         });
-        logger.info(`Posted [${postReason}]: "${deal.title.slice(0, 50)}"`);
       } catch (tgErr) {
+        const tgBody = tgErr.response?.body ?? tgErr.response ?? '';
+        logger.error(`[Telegram] ❌ SEND FAILED for deal ${deal._id}: ${tgErr.message} | response=${JSON.stringify(tgBody)}`);
         emit('crawler:deal-error', {
           type:    'error',
           title:   deal.title?.slice(0, 80),
           platform,
           reason:  tgErr.message,
         });
-        logger.error(`Telegram post failed for ${deal._id}: ${tgErr.message}`);
         await Deal.findByIdAndUpdate(deal._id, {
           'steps.telegram.done':  false,
           'steps.telegram.error': tgErr.message,
@@ -333,7 +474,7 @@ async function processProduct(url, platform, stats) {
     stats.errors++;
     if (stats.byPlatform[platform]) stats.byPlatform[platform].errors++;
     metrics.increment(`scrape.${platform}.errors`);
-    logger.error(`processProduct failed [${url}]: ${error.message}`);
+    logger.error(`[Scrape] ❌ processProduct FAILED [${platform}] ${url}: ${error.message}`);
   }
 }
 

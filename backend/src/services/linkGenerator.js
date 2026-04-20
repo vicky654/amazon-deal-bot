@@ -60,10 +60,13 @@ async function generateFinalLink(url, platform) {
       affiliateLink = await Promise.race([queuedTask, timeoutPromise(TIMEOUT_MS)]);
       logger.info(`[LinkGen][${platform}] affiliate: ${affiliateLink}`);
     } catch (err) {
-      logger.warn(`[LinkGen][${platform}] fallback — ${err.message}`);
+      const isSessionMissing = err.message === 'earnkaro_session_missing';
+      if (isSessionMissing) {
+        logger.debug(`[LinkGen][${platform}] EarnKaro session not available — using original URL`);
+      } else {
+        logger.warn(`[LinkGen][${platform}] affiliate fallback — ${err.message}`);
+      }
       affiliateLink = null;
-      // The queued Puppeteer task continues in background and closes its page.
-      // The affiliate queue is concurrency=1 so no parallel sessions are opened.
     }
   }
 

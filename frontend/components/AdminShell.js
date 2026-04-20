@@ -118,7 +118,8 @@ export default function AdminShell({ children }) {
 
         {/* ── Scrollable content ── */}
         <main
-          className="flex-1 overflow-y-auto overflow-x-hidden [-webkit-overflow-scrolling:touch] pb-24 lg:pb-6"
+          className="scroll-gpu flex-1 overflow-y-auto overflow-x-hidden pb-24 lg:pb-6"
+          style={{ overscrollBehavior: 'contain' }}
         >
           <div className="w-full max-w-7xl mx-auto px-3 sm:px-5 py-4 sm:py-6 animate-fade-in-up">
             {children}

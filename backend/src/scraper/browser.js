@@ -1,8 +1,12 @@
 /**
  * Singleton Browser Manager
  *
- * Uses puppeteer.executablePath() — the bundled Chromium downloaded at npm install.
- * No system Chrome. No env var overrides. Works on Render out of the box.
+ * Uses puppeteer.executablePath() — bundled Chromium, no system Chrome.
+ *
+ * --single-process and --no-zygote are intentionally OMITTED:
+ *   --single-process collapses all renderer processes into one; any navigation
+ *   crash kills the entire browser, causing the "Target closed" / "frame
+ *   detached" crash loop seen in production logs.
  */
 
 const puppeteer = require('puppeteer');
@@ -12,7 +16,6 @@ const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
 ];
 
 const LAUNCH_ARGS = [
@@ -20,23 +23,26 @@ const LAUNCH_ARGS = [
   '--disable-setuid-sandbox',
   '--disable-dev-shm-usage',
   '--disable-gpu',
-  '--no-zygote',
-  '--single-process',
   '--disable-extensions',
   '--disable-background-networking',
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
   '--window-size=1366,768',
   '--disable-blink-features=AutomationControlled',
 ];
 
 let _browser       = null;
-let _launchPromise = null;
+let _launchPromise = null; // mutex — prevents concurrent relaunch races
 
 async function getBrowser() {
   if (_browser && _browser.isConnected()) return _browser;
+
+  // If a launch is already in progress, wait for it instead of starting another
   if (_launchPromise) return _launchPromise;
 
   const executablePath = puppeteer.executablePath();
-  logger.info(`[Browser] Launching — bundled Chromium: ${executablePath}`);
+  logger.info(`[Browser] Launching — ${executablePath}`);
 
   _launchPromise = puppeteer
     .launch({
@@ -44,7 +50,8 @@ async function getBrowser() {
       executablePath,
       args:            LAUNCH_ARGS,
       defaultViewport: { width: 1366, height: 768 },
-      timeout:         30000,
+      timeout:         60000,
+      protocolTimeout: 60000,
     })
     .then((browser) => {
       _browser       = browser;
@@ -58,9 +65,8 @@ async function getBrowser() {
     })
     .catch((err) => {
       _launchPromise = null;
+      _browser       = null;
       logger.error(`[Browser] Launch FAILED: ${err.message}`);
-      logger.error(`[Browser] Expected Chromium at: ${executablePath}`);
-      logger.error('[Browser] Ensure PUPPETEER_SKIP_CHROMIUM_DOWNLOAD is NOT set in Render env vars');
       throw err;
     });
 
@@ -69,14 +75,24 @@ async function getBrowser() {
 
 async function closeBrowser() {
   if (_browser) {
-    await _browser.close().catch((e) => logger.warn('[Browser] Close error:', e.message));
+    await _browser.close().catch(() => {});
     _browser = null;
   }
 }
 
 async function openPage({ blockAssets = false, ua = null } = {}) {
-  const browser = await getBrowser();
-  const page    = await browser.newPage();
+  let browser = await getBrowser();
+  let page;
+
+  try {
+    page = await browser.newPage();
+  } catch (err) {
+    // Browser went away between getBrowser() and newPage() — relaunch once
+    logger.warn(`[Browser] newPage failed (${err.message}) — relaunching`);
+    _browser = null;
+    browser  = await getBrowser();
+    page     = await browser.newPage();
+  }
 
   await page.setUserAgent(ua || randomAgent());
   await page.setExtraHTTPHeaders({

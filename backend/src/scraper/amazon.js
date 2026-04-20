@@ -1,13 +1,17 @@
 /**
- * Amazon India Product Scraper
+ * Amazon India Product Scraper — ultra-stable, Amazon-only
  *
- * Returns standardised deal object.
- * All selector arrays are passed into page.evaluate() as arguments
- * so closures do NOT break serialisation.
+ * - domcontentloaded only (never networkidle2)
+ * - Fresh page per request, browser auto-relaunched on disconnect
+ * - "frame detached" aware retry
+ * - Blocks images/fonts/media/stylesheet for speed
+ * - Returns null on final failure (never crashes the queue)
  */
 
-const { openPage, randomDelay } = require('./browser');
+const { openPage, sleep } = require('./browser');
 const logger = require('../../utils/logger');
+
+// ── Selectors ─────────────────────────────────────────────────────────────────
 
 const TITLE_SELECTORS = [
   '#productTitle',
@@ -56,8 +60,9 @@ const BOT_SIGNALS = [
   'api-services-support@amazon',
 ];
 
-// Runs inside browser — must be a plain function, no closures
-function amazonPageEvaluator(priceSelectors, originalSelectors, titleSelectors, imageSelectors) {
+// ── Page evaluator (runs inside browser — no closures) ────────────────────────
+
+function amazonEvaluator(titleSels, priceSels, origSels, imgSels) {
   function qText(sels) {
     for (const s of sels) {
       const el = document.querySelector(s);
@@ -75,66 +80,100 @@ function amazonPageEvaluator(priceSelectors, originalSelectors, titleSelectors, 
     return isNaN(n) ? null : n;
   }
 
-  const title         = qText(titleSelectors);
-  const priceText     = qText(priceSelectors);
-  const originalText  = qText(originalSelectors);
-  const image         = qAttr(imageSelectors, 'src');
-  const price         = parseNum(priceText);
-  const originalPrice = parseNum(originalText);
-
-  let discount = null;
-  if (price && originalPrice && originalPrice > price) {
-    discount = Math.round(((originalPrice - price) / originalPrice) * 100);
-  }
+  const title         = qText(titleSels);
+  const price         = parseNum(qText(priceSels));
+  const originalPrice = parseNum(qText(origSels));
+  const image         = qAttr(imgSels, 'src');
+  const discount      = (price && originalPrice && originalPrice > price)
+    ? Math.round(((originalPrice - price) / originalPrice) * 100)
+    : null;
 
   return { title, price, originalPrice, discount, image, url: window.location.href };
 }
 
-async function scrapeAmazon(url, attempt = 1, maxAttempts = 3) {
-  const page = await openPage({ blockAssets: attempt > 1 });
+// ── Scraper ───────────────────────────────────────────────────────────────────
+
+const MAX_ATTEMPTS = 3;
+
+async function scrapeAmazon(url, attempt = 1) {
+  logger.info(`[Amazon] START → ${url} (attempt ${attempt}/${MAX_ATTEMPTS})`);
+
+  // Extract ASIN from URL for reliable DB dedup
+  const asinMatch = url.match(/\/dp\/([A-Z0-9]{10})/i);
+  const asin      = asinMatch ? asinMatch[1].toUpperCase() : null;
+
+  let page = null;
 
   try {
-    logger.info(`[Amazon][Attempt ${attempt}/${maxAttempts}] ${url}`);
+    // Always fresh page — browser auto-relaunches if disconnected (browser.js)
+    page = await openPage({ blockAssets: true });
 
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await randomDelay(1500, 3500);
+    // ── Navigate ────────────────────────────────────────────────────────────
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    } catch (navErr) {
+      // Mark detached errors so retry logic can identify them
+      if (navErr.message.includes('detached') || navErr.message.includes('Navigation failed')) {
+        navErr._detached = true;
+      }
+      throw navErr;
+    }
 
-    const content = await page.content();
-    if (BOT_SIGNALS.some((s) => content.includes(s))) {
+    // ── Stability: wait for body + settle ───────────────────────────────────
+    await page.waitForSelector('body', { timeout: 15000 });
+    await sleep(3000);
+
+    // ── Bot / CAPTCHA check ─────────────────────────────────────────────────
+    const html = await page.content();
+    if (BOT_SIGNALS.some((s) => html.includes(s))) {
       throw new Error('Bot/CAPTCHA detected');
     }
 
-    const currentUrl = page.url();
-    if (!currentUrl.includes('/dp/') && !currentUrl.includes('/gp/product/')) {
-      throw new Error(`Redirected away from product: ${currentUrl}`);
+    // ── Product page validation ─────────────────────────────────────────────
+    const finalUrl = page.url();
+    if (!finalUrl.includes('/dp/') && !finalUrl.includes('/gp/product/')) {
+      throw new Error(`Redirected off product page: ${finalUrl}`);
     }
 
-    try {
-      await page.waitForSelector(TITLE_SELECTORS[0], { timeout: 8000 });
-    } catch {
-      logger.warn('[Amazon] Primary title selector timeout — trying fallbacks');
-    }
+    // ── Wait for title (best-effort) ────────────────────────────────────────
+    await page.waitForSelector('#productTitle', { timeout: 15000 }).catch(() => {
+      logger.warn('[Amazon] #productTitle timeout — using fallback selectors');
+    });
 
+    // ── Extract ─────────────────────────────────────────────────────────────
     const raw = await page.evaluate(
-      amazonPageEvaluator,
+      amazonEvaluator,
+      TITLE_SELECTORS,
       PRICE_SELECTORS,
       ORIGINAL_PRICE_SELECTORS,
-      TITLE_SELECTORS,
-      IMAGE_SELECTORS
+      IMAGE_SELECTORS,
     );
 
-    if (!raw.title) throw new Error('Title not found — layout may have changed');
-
-    return { ...raw, platform: 'amazon' };
-  } catch (err) {
-    logger.error(`[Amazon][Attempt ${attempt}] ${err.message}`);
-    if (attempt < maxAttempts) {
-      await new Promise((r) => setTimeout(r, attempt * 3000));
-      return scrapeAmazon(url, attempt + 1, maxAttempts);
+    if (!raw.title || !raw.price) {
+      throw new Error(`Missing data — title=${!!raw.title} price=${!!raw.price}`);
     }
-    throw new Error(`Amazon scrape failed after ${maxAttempts} attempts: ${err.message}`);
+
+    logger.info(`[Amazon] SUCCESS → title="${raw.title.slice(0, 60)}" price=₹${raw.price} discount=${raw.discount ?? 'N/A'}%`);
+    return { ...raw, asin, platform: 'amazon' };
+
+  } catch (err) {
+    logger.error(`[Amazon] FAIL (attempt ${attempt}/${MAX_ATTEMPTS}) → ${err.message}`);
+
+    // Close broken page before any retry
+    if (page) { await page.close().catch(() => {}); page = null; }
+
+    if (attempt < MAX_ATTEMPTS) {
+      const delay = 2000 + Math.floor(Math.random() * 3000); // 2–5 s
+      logger.info(`[Amazon] Retrying in ${Math.round(delay / 1000)}s…`);
+      await sleep(delay);
+      return scrapeAmazon(url, attempt + 1);
+    }
+
+    logger.warn(`[Amazon] SKIPPED URL — ${url}`);
+    return null; // never throw — processProduct handles null cleanly
+
   } finally {
-    await page.close().catch(() => {});
+    if (page) await page.close().catch(() => {});
   }
 }
 

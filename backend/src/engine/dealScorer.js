@@ -20,13 +20,21 @@ const MIN_SCORE_TO_POST = parseInt(process.env.MIN_DEAL_SCORE || '30', 10);
  * @param {string} dealType  'discount' | 'price-drop' | 'manual'
  * @returns {number} score 0–100
  */
-function scoreDeal(product, dealType = 'discount') {
+/**
+ * @param {object} product
+ * @param {string} dealType
+ * @param {boolean} withJitter  Add ±8 pts of randomness so identical products
+ *                              don't always surface in the same order after
+ *                              PostedLog TTL expires. Default true at post time;
+ *                              false when storing to DB (deterministic record).
+ */
+function scoreDeal(product, dealType = 'discount', withJitter = false) {
   let score = 0;
 
-  const discount = product.discount || 0;
-  const price    = product.price    || 0;
+  const discount  = product.discount || 0;
+  const price     = product.price    || 0;
   const origPrice = product.originalPrice || 0;
-  const savings  = origPrice > price ? origPrice - price : 0;
+  const savings   = origPrice > price ? origPrice - price : 0;
 
   // ── Discount percentage (0–50 pts) ────────────────────────────────────────
   score += Math.min(discount, 70) * (50 / 70);
@@ -47,6 +55,9 @@ function scoreDeal(product, dealType = 'discount') {
 
   // ── Manual deal always gets boosted ──────────────────────────────────────
   if (dealType === 'manual') score += 10;
+
+  // ── Randomness jitter — prevents same product ranking identically each cycle
+  if (withJitter) score += Math.floor(Math.random() * 17) - 8;  // ±8 pts
 
   return Math.min(Math.round(score), 100);
 }

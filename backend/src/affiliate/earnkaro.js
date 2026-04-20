@@ -91,9 +91,10 @@ async function generateEarnKaroLink(productUrl, attempt = 1, maxAttempts = 3) {
         throw new Error(SESSION_REFRESHED); // caught below → clean retry
       }
 
-      throw new Error(
-        'EarnKaro session expired. Re-login via Admin → Settings → EarnKaro Login.'
-      );
+      // Session expired and no credentials to re-login.
+      // Throw a sentinel the linkGenerator will catch and silently fall back
+      // to the original URL. No Telegram alert from this path.
+      throw new Error('earnkaro_session_missing');
     }
 
     // Find URL input

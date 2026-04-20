@@ -51,16 +51,12 @@ async function runRefresh() {
       return { skipped: true, reason: 'healthy' };
     }
 
-    // Guard: need credentials
+    // Guard: need credentials — log only, no Telegram noise
     const creds = sessionSvc.getCredentials();
     if (!creds) {
-      const msg = 'No credentials in memory — cannot auto-refresh. Re-login via admin panel after server restart.';
+      const msg = 'No credentials in memory — skipping affiliate link generation. Re-login via admin panel.';
       logger.warn(`[EarnKaro][AutoRefresh] ${msg}`);
       await sessionSvc.addLog('refresh_skipped', 'warn', msg);
-
-      if (health.health !== 'healthy') {
-        await _alert(`⚠️ EarnKaro session is *${health.health}* (${health.cookieAgeHours}h old).\nAuto-refresh unavailable — credentials not in memory.\nPlease re-login via Admin → Settings.`);
-      }
       return { skipped: true, reason: 'no_credentials' };
     }
 

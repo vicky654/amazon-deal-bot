@@ -1,14 +1,13 @@
 /**
- * Reel Generator Service v2
+ * Reel Generator — Premium Instagram 9:16 (1080×1920)
  *
- * Generates a 1080×1920 Instagram Reel for a deal.
- *   Scene 1 (2s)  — Brand intro: gradient + headline + brand handle
- *   Scene 2 (5s)  — Product:  edge-to-edge image + safe-zone text + discount badge
- *   Scene 3 (3s)  — CTA: BUY NOW + Link in Bio + brand footer
+ * Scene 1 (2s)  — Brand intro: bold headline + urgency pill
+ * Scene 2 (5s)  — Product hero: image + price + discount badge + CTA
+ * Scene 3 (3s)  — CTA outro: buy now + Telegram channel link
  *
- * Safe zones: top 250px / bottom 250px (per Instagram spec)
+ * Safe zones: top 250px / bottom 250px (Instagram UI overlay)
  * Templates: dark | sale | minimal
- * Cache: backend/public/reels/{dealId}_{template}.mp4
+ * Output: backend/public/reels/{dealId}_{template}.mp4
  */
 
 const path         = require('path');
@@ -24,18 +23,17 @@ const _PQueue = require('p-queue');
 const PQueue  = _PQueue.default || _PQueue;
 const logger  = require('../../utils/logger');
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Canvas ────────────────────────────────────────────────────────────────────
 
-const W  = 1080;
-const H  = 1920;
-const SAFE_TOP = 250;     // Instagram UI covers top 250px
-const SAFE_BOT = 250;     // Instagram UI covers bottom 250px
-const SAFE_BOT_Y = H - SAFE_BOT; // y = 1670
+const W        = 1080;
+const H        = 1920;
+const SAFE_TOP = 260;
+const SAFE_BOT = 260;
 
-const REELS_DIR     = path.resolve(__dirname, '../../public/reels');
-const BRAND_HANDLE  = process.env.REEL_BRAND_HANDLE || '@dailydealsecommerce';
-const BRAND_NAME    = process.env.REEL_BRAND_NAME   || 'Daily Deals';
-const TG_LINK       = process.env.REEL_TG_URL       || 't.me/DailyDeals';
+const REELS_DIR    = path.resolve(__dirname, '../../public/reels');
+const BRAND_HANDLE = process.env.REEL_BRAND_HANDLE || '@dailydealsecommerce';
+const BRAND_NAME   = process.env.REEL_BRAND_NAME   || 'Daily Deals';
+const TG_LINK      = process.env.REEL_TG_URL       || 't.me/DailyDeals';
 
 fs.mkdirSync(REELS_DIR, { recursive: true });
 
@@ -45,41 +43,57 @@ const reelQueue = new PQueue({ concurrency: 1 });
 
 const THEMES = {
   dark: {
-    bg1: '#0d0221', bg2: '#1a0040',
-    accent: '#ff3cac', accentAlt: '#7b2fff',
-    text: '#ffffff', subtext: '#c8b8e8', mutedText: '#8a7aac',
-    deco1: '#ff3cac', deco2: '#7b2fff',
-    discBg: '#ff4500', discRing: 'rgba(255,107,53,0.35)', discText: '#ffffff',
-    ctaBg: '#ff3cac', ctaText: '#ffffff',
-    brandBg: 'rgba(255,255,255,0.07)', brandBorder: 'rgba(255,255,255,0.15)',
-    overlayStart: 'rgba(13,2,33,0)', overlayMid: 'rgba(13,2,33,0.55)', overlayEnd: 'rgba(13,2,33,0.92)',
-    imgBg: { r: 0, g: 0, b: 0, alpha: 0 },
+    // backgrounds
+    bg1: '#060010', bg2: '#0f0030',
+    // neon accents
+    accent: '#c850c0', accentAlt: '#4158d0',
+    accentMid: '#ffcc70',
+    // text
+    text: '#ffffff', subtext: '#d4bfff', mutedText: '#8a7aac',
+    // glow orbs
+    orb1: '#c850c0', orb2: '#4158d0',
+    // discount badge
+    discBg1: '#ff416c', discBg2: '#ff4b2b',
+    discText: '#ffffff',
+    discGlow: 'rgba(255,65,108,0.45)',
+    // CTA
+    ctaBg1: '#c850c0', ctaBg2: '#4158d0', ctaText: '#ffffff',
+    // brand pill
+    brandBg: 'rgba(255,255,255,0.06)', brandBorder: 'rgba(255,255,255,0.18)',
+    // gradient overlay on image
+    overlayMid: 'rgba(6,0,16,0.50)', overlayEnd: 'rgba(6,0,16,0.95)',
+    // image bg fallback
+    imgBg: { r: 10, g: 0, b: 24, alpha: 1 },
   },
   sale: {
-    bg1: '#5c0000', bg2: '#b30000',
-    accent: '#ffd700', accentAlt: '#ff6b35',
-    text: '#ffffff', subtext: '#ffe8e8', mutedText: '#ffcccc',
-    deco1: '#ffd700', deco2: '#ff6b35',
-    discBg: '#ff4500', discRing: 'rgba(255,107,53,0.35)', discText: '#ffffff',
-    ctaBg: '#ffd700', ctaText: '#1a1a1a',
-    brandBg: 'rgba(255,255,255,0.08)', brandBorder: 'rgba(255,255,255,0.20)',
-    overlayStart: 'rgba(92,0,0,0)', overlayMid: 'rgba(92,0,0,0.50)', overlayEnd: 'rgba(20,0,0,0.90)',
-    imgBg: { r: 0, g: 0, b: 0, alpha: 0 },
+    bg1: '#1a0000', bg2: '#3d0000',
+    accent: '#ffd700', accentAlt: '#ff6b35', accentMid: '#ff4500',
+    text: '#ffffff', subtext: '#ffe8cc', mutedText: '#ffc8a0',
+    orb1: '#ff4500', orb2: '#ffd700',
+    discBg1: '#ff4500', discBg2: '#ff6b35',
+    discText: '#ffffff', discGlow: 'rgba(255,69,0,0.50)',
+    ctaBg1: '#ffd700', ctaBg2: '#ff6b35', ctaText: '#1a0000',
+    brandBg: 'rgba(255,255,255,0.07)', brandBorder: 'rgba(255,215,0,0.30)',
+    overlayMid: 'rgba(26,0,0,0.45)', overlayEnd: 'rgba(26,0,0,0.94)',
+    imgBg: { r: 30, g: 5, b: 0, alpha: 1 },
   },
   minimal: {
-    bg1: '#f8f9fa', bg2: '#e8ecf0',
-    accent: '#e53e3e', accentAlt: '#c53030',
-    text: '#1a202c', subtext: '#4a5568', mutedText: '#718096',
-    deco1: '#e53e3e', deco2: '#feb2b2',
-    discBg: '#e53e3e', discRing: 'rgba(229,62,62,0.20)', discText: '#ffffff',
-    ctaBg: '#1a202c', ctaText: '#ffffff',
-    brandBg: 'rgba(0,0,0,0.04)', brandBorder: 'rgba(0,0,0,0.10)',
-    overlayStart: 'rgba(248,249,250,0)', overlayMid: 'rgba(248,249,250,0.35)', overlayEnd: 'rgba(232,236,240,0.92)',
-    imgBg: { r: 255, g: 255, b: 255, alpha: 0 },
+    bg1: '#0a0a0f', bg2: '#12121c',
+    accent: '#00d4ff', accentAlt: '#7b2fff', accentMid: '#ff3c78',
+    text: '#ffffff', subtext: '#b0b8d4', mutedText: '#6b7280',
+    orb1: '#00d4ff', orb2: '#7b2fff',
+    discBg1: '#ff3c78', discBg2: '#c850c0',
+    discText: '#ffffff', discGlow: 'rgba(255,60,120,0.40)',
+    ctaBg1: '#00d4ff', ctaBg2: '#7b2fff', ctaText: '#ffffff',
+    brandBg: 'rgba(255,255,255,0.05)', brandBorder: 'rgba(0,212,255,0.25)',
+    overlayMid: 'rgba(10,10,15,0.45)', overlayEnd: 'rgba(10,10,15,0.94)',
+    imgBg: { r: 10, g: 10, b: 20, alpha: 1 },
   },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const FONT = 'Arial, Helvetica, Liberation Sans, sans-serif';
 
 function esc(str) {
   return String(str ?? '')
@@ -91,10 +105,10 @@ function esc(str) {
 
 function fmtINR(n) {
   if (n == null || n === 0) return '';
-  return `Rs.${Number(n).toLocaleString('en-IN')}`;
+  return `₹${Number(n).toLocaleString('en-IN')}`;
 }
 
-function wrapTitle(text, maxChars = 28, maxLines = 2) {
+function wrapTitle(text, maxChars = 26, maxLines = 2) {
   const words = String(text).trim().toUpperCase().split(/\s+/);
   const lines = [];
   let cur = '';
@@ -110,13 +124,10 @@ function wrapTitle(text, maxChars = 28, maxLines = 2) {
   }
   if (cur && lines.length < maxLines) lines.push(cur);
   if (lines.length === maxLines) {
-    // Truncate last line if original had more content
     const usedWords = lines.join(' ').split(' ');
     if (usedWords.length < words.length) {
       const last = lines[lines.length - 1];
-      if (last.length > maxChars - 1) {
-        lines[lines.length - 1] = `${last.slice(0, maxChars - 1)}\u2026`;
-      } else if (!last.endsWith('\u2026') && usedWords.length < words.length) {
+      if (!last.endsWith('\u2026') && last.length <= maxChars - 1) {
         lines[lines.length - 1] = `${last}\u2026`.slice(0, maxChars);
       }
     }
@@ -148,8 +159,6 @@ function runFFmpeg(args, timeoutMs = 180_000) {
   });
 }
 
-const FONT = 'Arial, Helvetica, Liberation Sans, sans-serif';
-
 // ── Scene 1 — Brand Intro ─────────────────────────────────────────────────────
 
 async function buildScene1(theme) {
@@ -165,64 +174,81 @@ async function buildScene1(theme) {
       <stop offset="0%"   stop-color="${t.accent}"/>
       <stop offset="100%" stop-color="${t.accentAlt}"/>
     </linearGradient>
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="${t.accent}"/>
+      <stop offset="50%"  stop-color="${t.accentMid}"/>
+      <stop offset="100%" stop-color="${t.accentAlt}"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
 
   <!-- Background -->
   <rect width="${W}" height="${H}" fill="url(#bg)"/>
 
-  <!-- Decorative glow circles -->
-  <circle cx="1080" cy="380"  r="480" fill="${t.deco1}" fill-opacity="0.10"/>
-  <circle cx="-60"  cy="1600" r="440" fill="${t.accentAlt}" fill-opacity="0.10"/>
-  <circle cx="580"  cy="980"  r="600" fill="${t.deco1}" fill-opacity="0.04"/>
+  <!-- Glow orbs for depth -->
+  <circle cx="200"  cy="500"  r="380" fill="${t.orb1}" fill-opacity="0.13"/>
+  <circle cx="980"  cy="1500" r="420" fill="${t.orb2}" fill-opacity="0.12"/>
+  <circle cx="540"  cy="960"  r="700" fill="${t.orb1}" fill-opacity="0.04"/>
 
-  <!-- Top brand area (inside safe zone = below y=250) -->
-  <!-- Brand handle pill -->
-  <rect x="290" y="285" width="500" height="70" rx="35"
+  <!-- Top brand pill -->
+  <rect x="300" y="${SAFE_TOP}" width="480" height="66" rx="33"
         fill="${t.brandBg}" stroke="${t.brandBorder}" stroke-width="1.5"/>
-  <text x="540" y="321" text-anchor="middle" dominant-baseline="middle"
-        fill="${t.accent}" font-size="32" font-weight="bold" letter-spacing="1"
+  <text x="540" y="${SAFE_TOP + 33}" text-anchor="middle" dominant-baseline="middle"
+        fill="${t.accent}" font-size="30" font-weight="bold" letter-spacing="1"
         font-family="${FONT}">${esc(BRAND_HANDLE)}</text>
 
-  <!-- HOT DEAL pill badge -->
-  <rect x="330" y="590" width="420" height="80" rx="40" fill="url(#accentGrad)"/>
-  <text x="540" y="630" text-anchor="middle" dominant-baseline="middle"
-        fill="white" font-size="38" font-weight="bold" letter-spacing="3"
-        font-family="${FONT}">&#9733; HOT DEAL &#9733;</text>
+  <!-- HOT DEAL urgency pill -->
+  <rect x="300" y="555" width="480" height="82" rx="41" fill="url(#accentGrad)"/>
+  <text x="540" y="596" text-anchor="middle" dominant-baseline="middle"
+        fill="white" font-size="38" font-weight="bold" letter-spacing="4"
+        font-family="${FONT}">&#9889; LIGHTNING DEAL</text>
 
-  <!-- Main headline -->
-  <text x="540" y="820"
+  <!-- CRAZY -->
+  <text x="540" y="810"
         text-anchor="middle" fill="${t.text}"
-        font-size="148" font-weight="bold" letter-spacing="4"
+        font-size="158" font-weight="bold" letter-spacing="6"
         font-family="${FONT}">CRAZY</text>
+
+  <!-- DEAL! — gradient-fill via rect mask trick -->
   <text x="540" y="985"
         text-anchor="middle" fill="${t.accent}"
-        font-size="156" font-weight="bold" letter-spacing="4"
+        font-size="166" font-weight="bold" letter-spacing="6"
         font-family="${FONT}">DEAL!</text>
 
-  <!-- Accent bar -->
-  <rect x="180" y="1040" width="720" height="5" rx="3" fill="${t.accent}" fill-opacity="0.6"/>
+  <!-- Accent underline -->
+  <rect x="160" y="1035" width="760" height="5" rx="3" fill="${t.accent}" fill-opacity="0.55"/>
 
   <!-- Subtext -->
   <text x="540" y="1110" text-anchor="middle" fill="${t.subtext}"
         font-size="46" font-family="${FONT}">Limited Time Only</text>
 
-  <!-- Deal type indicators -->
-  <rect x="200" y="1180" width="680" height="1.5" fill="${t.deco1}" fill-opacity="0.25"/>
+  <!-- Value badges row -->
+  <rect x="100"  y="1190" width="248" height="70" rx="35" fill="${t.brandBg}" stroke="${t.brandBorder}" stroke-width="1.5"/>
+  <text x="224"  y="1225" text-anchor="middle" dominant-baseline="middle"
+        fill="${t.text}" font-size="34" font-weight="bold" font-family="${FONT}">Top Brands</text>
 
-  <!-- CTA hint -->
-  <text x="540" y="1380" text-anchor="middle" fill="${t.mutedText}"
-        font-size="40" font-family="${FONT}">Swipe to see the deal</text>
-  <!-- Down arrow (Unicode &#9660; = ▼) -->
-  <text x="540" y="1450" text-anchor="middle" fill="${t.accent}"
-        font-size="52" font-family="${FONT}">&#9660;</text>
+  <rect x="416"  y="1190" width="248" height="70" rx="35" fill="${t.brandBg}" stroke="${t.brandBorder}" stroke-width="1.5"/>
+  <text x="540"  y="1225" text-anchor="middle" dominant-baseline="middle"
+        fill="${t.text}" font-size="34" font-weight="bold" font-family="${FONT}">50%+ OFF</text>
+
+  <rect x="732"  y="1190" width="248" height="70" rx="35" fill="${t.brandBg}" stroke="${t.brandBorder}" stroke-width="1.5"/>
+  <text x="856"  y="1225" text-anchor="middle" dominant-baseline="middle"
+        fill="${t.text}" font-size="34" font-weight="bold" font-family="${FONT}">Amazon</text>
+
+  <!-- Swipe hint -->
+  <text x="540" y="1420" text-anchor="middle" fill="${t.subtext}"
+        font-size="42" font-family="${FONT}">Swipe to see the deal</text>
+  <text x="540" y="1494" text-anchor="middle" fill="${t.accent}"
+        font-size="56" font-family="${FONT}">&#8964;</text>
 
   <!-- Stars -->
-  <text x="540" y="1600" text-anchor="middle" fill="${t.accent}"
-        font-size="48" letter-spacing="20" font-family="${FONT}">
-    &#9733; &#9733; &#9733; &#9733; &#9733;
-  </text>
+  <text x="540" y="1635" text-anchor="middle" fill="${t.accent}"
+        font-size="50" letter-spacing="22" font-family="${FONT}">&#9733; &#9733; &#9733; &#9733; &#9733;</text>
 
-  <!-- Bottom brand footer (above safe bottom = below y=1670) -->
+  <!-- Footer -->
   <text x="540" y="1790" text-anchor="middle" fill="${t.mutedText}"
         font-size="34" font-family="${FONT}">${esc(BRAND_NAME)} | ${esc(TG_LINK)}</text>
 </svg>`;
@@ -230,44 +256,40 @@ async function buildScene1(theme) {
   return sharp(Buffer.from(svg)).resize(W, H).png().toBuffer();
 }
 
-// ── Scene 2 — Product ─────────────────────────────────────────────────────────
+// ── Scene 2 — Product Hero ────────────────────────────────────────────────────
 
 async function buildScene2(deal, imgBuffer, theme) {
-  const t      = THEMES[theme] || THEMES.dark;
-  const lines  = wrapTitle(deal.title, 28, 2);
-  const price  = fmtINR(deal.price);
-  const orig   = fmtINR(deal.originalPrice);
-  const disc   = deal.discount ? `${Math.round(Number(deal.discount))}%` : '';
+  const t     = THEMES[theme] || THEMES.dark;
+  const lines = wrapTitle(deal.title, 26, 2);
+  const price = fmtINR(deal.price);
+  const orig  = fmtINR(deal.originalPrice);
+  const disc  = deal.discount ? `${Math.round(Number(deal.discount))}%` : '';
   const saving = (deal.originalPrice && deal.price && deal.originalPrice > deal.price)
     ? fmtINR(Number(deal.originalPrice) - Number(deal.price))
     : '';
 
-  // Layout constants — all content between safe zones (250 to 1670)
-  const hasImage   = !!imgBuffer;
-  const IMG_MAX    = 900;                          // max image dimension
-  const IMG_LEFT   = Math.floor((W - IMG_MAX) / 2); // 90
-  const IMG_TOP    = 260;                          // just inside safe top
-  const IMG_BOT    = hasImage ? IMG_TOP + IMG_MAX : 540; // 1160 or 540
+  // Layout constants — everything within safe zones (260 → 1660)
+  const IMG_SIZE  = 860;
+  const IMG_LEFT  = Math.floor((W - IMG_SIZE) / 2); // 110
+  const IMG_TOP   = SAFE_TOP + 5;                    // 265
+  const IMG_BOT   = imgBuffer ? IMG_TOP + IMG_SIZE : 560; // 1125
 
-  const TEXT_START = IMG_BOT + 55;                // 1215 or 595
-  const LINE_H     = 80;
-  const N_LINES    = lines.length;
-  const SEP_Y      = TEXT_START + N_LINES * LINE_H + 10;
-  const PRICE_Y    = SEP_Y + 95;                  // large price baseline
-  const ORIG_Y     = PRICE_Y + 100;               // strikethrough baseline
-  const SAVE_Y     = ORIG_Y + 68;                 // savings line
-  const CTA_TOP    = Math.min(SAVE_Y + 55, 1560); // CTA button top
-  const CTA_H      = 96;
-  const CTA_BOT    = CTA_TOP + CTA_H;
-  const BIO_Y      = Math.min(CTA_BOT + 38, 1648);
-  const FOOTER_Y   = 1785;
+  const TEXT_Y0   = IMG_BOT + 60;           // title line 1
+  const LINE_H    = 82;
+  const SEP_Y     = TEXT_Y0 + lines.length * LINE_H + 8;
+  const PRICE_Y   = SEP_Y + 100;
+  const ORIG_Y    = PRICE_Y + 95;
+  const SAVE_Y    = ORIG_Y + 62;
+  const CTA_TOP   = Math.min(SAVE_Y + 50, 1548);
+  const CTA_H     = 100;
+  const BIO_Y     = Math.min(CTA_TOP + CTA_H + 44, 1660);
 
-  // Discount badge (right side, vertically aligned with price)
-  const BADGE_CX   = 922;
-  const BADGE_CY   = PRICE_Y - 15;
-  const BADGE_R    = 120;
+  // Discount badge position (right side, aligned with price)
+  const BADGE_CX  = 930;
+  const BADGE_CY  = PRICE_Y - 16;
+  const BADGE_R   = 118;
 
-  // ── 1. Gradient background ─────────────────────────────────────────────────
+  // ── background ─────────────────────────────────────────────────────────────
   const bgSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
     <defs>
       <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -276,17 +298,17 @@ async function buildScene2(deal, imgBuffer, theme) {
       </linearGradient>
     </defs>
     <rect width="${W}" height="${H}" fill="url(#bg)"/>
-    <circle cx="1050" cy="1820" r="320" fill="${t.deco1}" fill-opacity="0.06"/>
-    <circle cx="-40"  cy="100"  r="260" fill="${t.deco1}" fill-opacity="0.06"/>
+    <circle cx="950"  cy="1800" r="300" fill="${t.orb1}" fill-opacity="0.08"/>
+    <circle cx="-40"  cy="80"   r="260" fill="${t.orb2}" fill-opacity="0.08"/>
   </svg>`;
 
   const composites = [];
 
-  // ── 2. Product image (edge-to-edge, contained, no card wrapper) ────────────
+  // ── product image ──────────────────────────────────────────────────────────
   if (imgBuffer) {
     try {
       const productPng = await sharp(imgBuffer)
-        .resize(IMG_MAX, IMG_MAX, { fit: 'contain', background: t.imgBg })
+        .resize(IMG_SIZE, IMG_SIZE, { fit: 'contain', background: t.imgBg })
         .png()
         .toBuffer();
       composites.push({ input: productPng, top: IMG_TOP, left: IMG_LEFT });
@@ -295,101 +317,107 @@ async function buildScene2(deal, imgBuffer, theme) {
     }
   }
 
-  // ── 3. Gradient overlay (bottom → readability for text on image) ───────────
+  // ── gradient overlay (makes text readable over image) ─────────────────────
+  const overlayY = imgBuffer ? Math.max(IMG_BOT - 340, IMG_TOP) : 0;
   const overlaySvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
     <defs>
       <linearGradient id="ov" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%"   stop-color="${t.overlayStart}"/>
-        <stop offset="45%"  stop-color="${t.overlayMid}"/>
-        <stop offset="72%"  stop-color="${t.overlayEnd}"/>
+        <stop offset="0%"   stop-color="${t.bg1}" stop-opacity="0"/>
+        <stop offset="40%"  stop-color="${t.overlayMid}"/>
+        <stop offset="65%"  stop-color="${t.overlayEnd}"/>
         <stop offset="100%" stop-color="${t.overlayEnd}"/>
       </linearGradient>
     </defs>
-    <rect y="${hasImage ? IMG_BOT - 300 : 0}" width="${W}" height="${H}" fill="url(#ov)"/>
+    <rect y="${overlayY}" width="${W}" height="${H}" fill="url(#ov)"/>
   </svg>`;
   composites.push({ input: Buffer.from(overlaySvg), top: 0, left: 0 });
 
-  // ── 4. Text + badge SVG overlay ────────────────────────────────────────────
+  // ── text + badge layer ─────────────────────────────────────────────────────
   const textSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
     <defs>
-      <linearGradient id="ag" x1="0%" y1="0%" x2="100%" y2="100%">
+      <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%"   stop-color="${t.accent}"/>
         <stop offset="100%" stop-color="${t.accentAlt}"/>
       </linearGradient>
       <linearGradient id="ctaGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%"   stop-color="${t.ctaBg}"/>
-        <stop offset="100%" stop-color="${t.accent}"/>
+        <stop offset="0%"   stop-color="${t.ctaBg1}"/>
+        <stop offset="100%" stop-color="${t.ctaBg2}"/>
+      </linearGradient>
+      <linearGradient id="discGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%"   stop-color="${t.discBg1}"/>
+        <stop offset="100%" stop-color="${t.discBg2}"/>
       </linearGradient>
     </defs>
 
-    <!-- Brand handle (top, inside safe zone) -->
-    <rect x="305" y="275" width="470" height="64" rx="32"
+    <!-- Brand handle (top safe zone) -->
+    <rect x="300" y="${SAFE_TOP}" width="480" height="64" rx="32"
           fill="${t.brandBg}" stroke="${t.brandBorder}" stroke-width="1.5"/>
-    <text x="540" y="307" text-anchor="middle" dominant-baseline="middle"
-          fill="${t.accent}" font-size="30" font-weight="bold" letter-spacing="0.5"
+    <text x="540" y="${SAFE_TOP + 32}" text-anchor="middle" dominant-baseline="middle"
+          fill="${t.accent}" font-size="29" font-weight="bold" letter-spacing="0.5"
           font-family="${FONT}">${esc(BRAND_HANDLE)}</text>
 
-    <!-- Product title (max 2 lines) -->
+    <!-- Product title -->
     ${lines.map((l, i) => `
-    <text x="540" y="${TEXT_START + i * LINE_H}"
+    <text x="540" y="${TEXT_Y0 + i * LINE_H}"
           text-anchor="middle" fill="${t.text}"
-          font-size="64" font-weight="bold" letter-spacing="0.5"
+          font-size="68" font-weight="bold" letter-spacing="0.3"
           font-family="${FONT}">${esc(l)}</text>`).join('')}
 
     <!-- Separator -->
-    <rect x="160" y="${SEP_Y}" width="760" height="3" rx="2"
-          fill="${t.accent}" fill-opacity="0.50"/>
+    <rect x="120" y="${SEP_Y}" width="840" height="3" rx="2"
+          fill="${t.accent}" fill-opacity="0.45"/>
 
-    <!-- Price (left-aligned, large) -->
-    ${price ? `<text x="88" y="${PRICE_Y}"
+    <!-- Deal price (left-aligned, XL) -->
+    ${price ? `<text x="78" y="${PRICE_Y}"
           text-anchor="start" fill="${t.accent}"
-          font-size="106" font-weight="bold"
+          font-size="116" font-weight="bold"
           font-family="${FONT}">${esc(price)}</text>` : ''}
 
     <!-- Original price (strikethrough) -->
-    ${orig ? `<text x="88" y="${ORIG_Y}"
+    ${orig ? `<text x="78" y="${ORIG_Y}"
           text-anchor="start" fill="${t.subtext}"
-          font-size="50" text-decoration="line-through"
+          font-size="52" text-decoration="line-through" fill-opacity="0.85"
           font-family="${FONT}">${esc(orig)}</text>` : ''}
 
-    <!-- Savings text -->
-    ${saving ? `<text x="88" y="${SAVE_Y}"
-          text-anchor="start" fill="${t.mutedText}"
-          font-size="38" font-family="${FONT}">You save ${esc(saving)}</text>` : ''}
+    <!-- Savings -->
+    ${saving ? `<text x="78" y="${SAVE_Y}"
+          text-anchor="start" fill="${t.accentMid}"
+          font-size="40" font-weight="bold"
+          font-family="${FONT}">&#10003; You save ${esc(saving)}</text>` : ''}
 
-    <!-- Discount badge (right side) -->
+    <!-- Discount badge (right) -->
     ${disc ? `
-    <!-- Outer glow ring -->
-    <circle cx="${BADGE_CX}" cy="${BADGE_CY}" r="${BADGE_R + 14}" fill="${t.discRing}"/>
-    <!-- Main circle -->
-    <circle cx="${BADGE_CX}" cy="${BADGE_CY}" r="${BADGE_R}" fill="${t.discBg}"/>
-    <!-- Inner white ring -->
-    <circle cx="${BADGE_CX}" cy="${BADGE_CY}" r="${BADGE_R - 12}"
-            fill="none" stroke="white" stroke-width="2.5" stroke-opacity="0.55"/>
-    <!-- Percentage text -->
-    <text x="${BADGE_CX}" y="${BADGE_CY - 12}" text-anchor="middle"
-          fill="${t.discText}" font-size="64" font-weight="bold"
+    <!-- outer glow -->
+    <circle cx="${BADGE_CX}" cy="${BADGE_CY}" r="${BADGE_R + 22}" fill="${t.discGlow}"/>
+    <!-- main filled circle -->
+    <circle cx="${BADGE_CX}" cy="${BADGE_CY}" r="${BADGE_R}" fill="url(#discGrad)"/>
+    <!-- white inner ring -->
+    <circle cx="${BADGE_CX}" cy="${BADGE_CY}" r="${BADGE_R - 14}"
+            fill="none" stroke="white" stroke-width="2.5" stroke-opacity="0.45"/>
+    <!-- percentage -->
+    <text x="${BADGE_CX}" y="${BADGE_CY - 14}" text-anchor="middle"
+          fill="${t.discText}" font-size="68" font-weight="bold"
           font-family="${FONT}">${esc(disc)}</text>
-    <!-- OFF label -->
+    <!-- OFF -->
     <text x="${BADGE_CX}" y="${BADGE_CY + 52}" text-anchor="middle"
-          fill="${t.discText}" font-size="40" font-weight="bold" letter-spacing="3"
+          fill="${t.discText}" font-size="42" font-weight="bold" letter-spacing="4"
           font-family="${FONT}">OFF</text>` : ''}
 
     <!-- CTA button -->
-    <rect x="88" y="${CTA_TOP}" width="${disc ? 740 : 904}" height="${CTA_H}" rx="${CTA_H / 2}"
+    <rect x="78" y="${CTA_TOP}" width="${disc ? 760 : 924}" height="${CTA_H}" rx="${CTA_H / 2}"
           fill="url(#ctaGrad)"/>
-    <text x="${disc ? 88 + 370 : 88 + 452}" y="${CTA_TOP + CTA_H / 2}" text-anchor="middle"
-          dominant-baseline="middle"
-          fill="${t.ctaText}" font-size="54" font-weight="bold" letter-spacing="2"
-          font-family="${FONT}">BUY NOW &#9660;</text>
+    <text x="${disc ? 78 + 380 : 78 + 462}" y="${CTA_TOP + CTA_H / 2}"
+          text-anchor="middle" dominant-baseline="middle"
+          fill="${t.ctaText}" font-size="52" font-weight="bold" letter-spacing="3"
+          font-family="${FONT}">&#128722; BUY NOW</text>
 
-    <!-- Link in Bio -->
+    <!-- Link in bio -->
     <text x="540" y="${BIO_Y}" text-anchor="middle"
           fill="${t.subtext}" font-size="40" font-weight="bold"
           font-family="${FONT}">&#128279; Link in Bio</text>
 
-    <!-- Bottom brand footer -->
-    <text x="540" y="${FOOTER_Y}" text-anchor="middle" fill="${t.mutedText}"
+    <!-- Footer -->
+    <text x="540" y="1792" text-anchor="middle" fill="${t.mutedText}"
           font-size="32" font-family="${FONT}">${esc(BRAND_NAME)} | ${esc(TG_LINK)}</text>
   </svg>`;
 
@@ -402,7 +430,7 @@ async function buildScene2(deal, imgBuffer, theme) {
     .toBuffer();
 }
 
-// ── Scene 3 — CTA ─────────────────────────────────────────────────────────────
+// ── Scene 3 — CTA Outro ───────────────────────────────────────────────────────
 
 async function buildScene3(theme) {
   const t = THEMES[theme] || THEMES.dark;
@@ -414,82 +442,91 @@ async function buildScene3(theme) {
       <stop offset="100%" stop-color="${t.bg2}"/>
     </linearGradient>
     <linearGradient id="btnGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%"   stop-color="${t.ctaBg}"/>
+      <stop offset="0%"   stop-color="${t.ctaBg1}"/>
+      <stop offset="100%" stop-color="${t.ctaBg2}"/>
+    </linearGradient>
+    <linearGradient id="tgGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="${t.accentAlt}"/>
       <stop offset="100%" stop-color="${t.accent}"/>
     </linearGradient>
   </defs>
 
   <!-- Background -->
   <rect width="${W}" height="${H}" fill="url(#bg)"/>
-  <circle cx="180"  cy="450"  r="360" fill="${t.deco1}" fill-opacity="0.09"/>
-  <circle cx="960"  cy="1550" r="400" fill="${t.accentAlt}" fill-opacity="0.08"/>
+  <circle cx="160"  cy="400"  r="360" fill="${t.orb1}" fill-opacity="0.10"/>
+  <circle cx="960"  cy="1580" r="420" fill="${t.orb2}" fill-opacity="0.09"/>
 
-  <!-- Brand handle at top (safe zone) -->
-  <rect x="305" y="285" width="470" height="64" rx="32"
+  <!-- Brand handle -->
+  <rect x="300" y="${SAFE_TOP}" width="480" height="66" rx="33"
         fill="${t.brandBg}" stroke="${t.brandBorder}" stroke-width="1.5"/>
-  <text x="540" y="317" text-anchor="middle" dominant-baseline="middle"
-        fill="${t.accent}" font-size="30" font-weight="bold" letter-spacing="0.5"
+  <text x="540" y="${SAFE_TOP + 33}" text-anchor="middle" dominant-baseline="middle"
+        fill="${t.accent}" font-size="30" font-weight="bold" letter-spacing="1"
         font-family="${FONT}">${esc(BRAND_HANDLE)}</text>
 
-  <!-- Large shopping icon area (concentric circles) -->
-  <circle cx="540" cy="620" r="230" fill="${t.accent}" fill-opacity="0.12"/>
-  <circle cx="540" cy="620" r="180" fill="${t.accent}" fill-opacity="0.18"/>
-  <circle cx="540" cy="620" r="130" fill="${t.accent}" fill-opacity="0.28"/>
-  <!-- Shopping bag icon (simplified SVG path) -->
-  <g transform="translate(478, 558)">
-    <rect x="0"  y="24" width="124" height="96" rx="8" fill="${t.ctaText}" fill-opacity="0.9"/>
-    <path d="M24 24 C24 0 100 0 100 24" fill="none" stroke="${t.ctaText}" stroke-width="10"
-          stroke-linecap="round" stroke-opacity="0.9"/>
+  <!-- Central icon (shopping bag concentric rings) -->
+  <circle cx="540" cy="640" r="230" fill="${t.accent}" fill-opacity="0.10"/>
+  <circle cx="540" cy="640" r="178" fill="${t.accent}" fill-opacity="0.17"/>
+  <circle cx="540" cy="640" r="126" fill="${t.accent}" fill-opacity="0.28"/>
+  <!-- Shopping bag simplified -->
+  <g transform="translate(478,578)">
+    <rect x="0"  y="24" width="124" height="96" rx="10" fill="white" fill-opacity="0.88"/>
+    <path d="M24 24 C24 0 100 0 100 24" fill="none" stroke="white" stroke-width="10"
+          stroke-linecap="round" stroke-opacity="0.88"/>
     <circle cx="44" cy="24" r="5" fill="${t.accent}"/>
     <circle cx="80" cy="24" r="5" fill="${t.accent}"/>
   </g>
 
   <!-- Main CTA heading -->
-  <text x="540" y="890" text-anchor="middle" fill="${t.text}"
-        font-size="90" font-weight="bold" letter-spacing="2"
-        font-family="${FONT}">GET IT NOW!</text>
+  <text x="540" y="910" text-anchor="middle" fill="${t.text}"
+        font-size="94" font-weight="bold" letter-spacing="3"
+        font-family="${FONT}">GET THIS DEAL!</text>
 
-  <!-- BUY NOW button -->
-  <rect x="110" y="960" width="860" height="120" rx="60" fill="url(#btnGrad)"/>
-  <text x="540" y="1020" text-anchor="middle" dominant-baseline="middle"
-        fill="${t.ctaText}" font-size="68" font-weight="bold" letter-spacing="4"
-        font-family="${FONT}">BUY NOW &#9660;</text>
+  <!-- BUY NOW button (large) -->
+  <rect x="80" y="975" width="920" height="120" rx="60" fill="url(#btnGrad)"/>
+  <text x="540" y="1035" text-anchor="middle" dominant-baseline="middle"
+        fill="${t.ctaText}" font-size="64" font-weight="bold" letter-spacing="5"
+        font-family="${FONT}">&#128722;  BUY NOW</text>
 
   <!-- Link in Bio -->
-  <text x="540" y="1135" text-anchor="middle" fill="${t.text}"
-        font-size="68" font-weight="bold"
+  <text x="540" y="1165" text-anchor="middle" fill="${t.text}"
+        font-size="62" font-weight="bold"
         font-family="${FONT}">&#128279; Link in Bio</text>
-  <text x="540" y="1210" text-anchor="middle" fill="${t.subtext}"
-        font-size="42" font-family="${FONT}">Tap the link above to grab the deal</text>
+  <text x="540" y="1240" text-anchor="middle" fill="${t.subtext}"
+        font-size="40" font-family="${FONT}">Tap the link above to grab the deal</text>
 
   <!-- Divider -->
-  <rect x="200" y="1285" width="680" height="3" rx="2" fill="${t.accent}" fill-opacity="0.40"/>
+  <rect x="180" y="1300" width="720" height="3" rx="2"
+        fill="${t.accent}" fill-opacity="0.38"/>
 
-  <!-- Telegram CTA -->
-  <text x="540" y="1370" text-anchor="middle" fill="${t.text}"
-        font-size="46" font-weight="bold" font-family="${FONT}">More deals on Telegram</text>
-  <text x="540" y="1450" text-anchor="middle" fill="${t.accent}"
-        font-size="50" font-weight="bold" font-family="${FONT}">${esc(TG_LINK)}</text>
+  <!-- Telegram section -->
+  <text x="540" y="1385" text-anchor="middle" fill="${t.text}"
+        font-size="48" font-weight="bold" font-family="${FONT}">&#9993; Join Telegram for More</text>
+  <!-- Telegram pill -->
+  <rect x="200" y="1420" width="680" height="78" rx="39" fill="url(#tgGrad)" fill-opacity="0.18"
+        stroke="${t.accent}" stroke-width="1.5"/>
+  <text x="540" y="1459" text-anchor="middle" dominant-baseline="middle"
+        fill="${t.accent}" font-size="42" font-weight="bold"
+        font-family="${FONT}">${esc(TG_LINK)}</text>
 
-  <!-- Follow text -->
-  <text x="540" y="1545" text-anchor="middle" fill="${t.subtext}"
-        font-size="40" font-family="${FONT}">Follow for daily hot deals!</text>
+  <!-- Follow -->
+  <text x="540" y="1560" text-anchor="middle" fill="${t.subtext}"
+        font-size="42" font-family="${FONT}">Follow for daily hot deals &#9889;</text>
 
   <!-- Stars -->
-  <text x="540" y="1635" text-anchor="middle" fill="${t.accent}"
-        font-size="50" letter-spacing="18" font-family="${FONT}">
+  <text x="540" y="1652" text-anchor="middle" fill="${t.accent}"
+        font-size="50" letter-spacing="20" font-family="${FONT}">
     &#9733; &#9733; &#9733; &#9733; &#9733;
   </text>
 
-  <!-- Brand footer -->
-  <text x="540" y="1790" text-anchor="middle" fill="${t.mutedText}"
+  <!-- Footer -->
+  <text x="540" y="1792" text-anchor="middle" fill="${t.mutedText}"
         font-size="34" font-family="${FONT}">${esc(BRAND_NAME)} | ${esc(TG_LINK)}</text>
 </svg>`;
 
   return sharp(Buffer.from(svg)).resize(W, H).png().toBuffer();
 }
 
-// ── FFmpeg encoding ───────────────────────────────────────────────────────────
+// ── FFmpeg video assembly ─────────────────────────────────────────────────────
 
 async function framesToVideo(frames, outputPath) {
   const id       = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -498,21 +535,21 @@ async function framesToVideo(frames, outputPath) {
   try {
     await Promise.all(frames.map((buf, i) => fs.promises.writeFile(tmpFiles[i], buf)));
 
+    // Scene durations: intro 2s, product 5s, cta 3s
     const durations = [2, 5, 3];
-    const fadeDur   = 0.45;
+    const fadeDur   = 0.4;
 
-    // Per-clip fade in/out, then concat to single stream
     const filterParts = frames.map((_, i) => {
       const d = durations[i];
       const parts = [];
-      if (i > 0)              parts.push(`fade=t=in:st=0:d=${fadeDur}`);
+      if (i > 0)                  parts.push(`fade=t=in:st=0:d=${fadeDur}`);
       if (i < frames.length - 1) parts.push(`fade=t=out:st=${d - fadeDur}:d=${fadeDur}`);
-      const chain = parts.length ? `[${i}:v]${parts.join(',')},` : `[${i}:v]`;
-      return `${chain.replace(/,$/, '')}[v${i}]`;
+      const chain = parts.length ? `[${i}:v]${parts.join(',')}` : `[${i}:v]`;
+      return `${chain}[v${i}]`;
     });
-    const concatInputs = frames.map((_, i) => `[v${i}]`).join('');
+    const concatIn = frames.map((_, i) => `[v${i}]`).join('');
     filterParts.push(
-      `${concatInputs}concat=n=${frames.length}:v=1:a=0,scale=${W}:${H},format=yuv420p[out]`
+      `${concatIn}concat=n=${frames.length}:v=1:a=0,scale=${W}:${H},format=yuv420p[out]`
     );
 
     const args = [
@@ -522,7 +559,7 @@ async function framesToVideo(frames, outputPath) {
       '-loop', '1', '-framerate', '24', '-t', String(durations[2]), '-i', tmpFiles[2],
       '-filter_complex', filterParts.join(';'),
       '-map', '[out]',
-      '-c:v', 'libx264', '-preset', 'fast', '-crf', '22',
+      '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
       '-movflags', '+faststart',
       outputPath,
     ];
@@ -536,8 +573,7 @@ async function framesToVideo(frames, outputPath) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 async function generateReel(deal, template = 'dark') {
-  const validTemplates = Object.keys(THEMES);
-  const tpl    = validTemplates.includes(template) ? template : 'dark';
+  const tpl    = Object.keys(THEMES).includes(template) ? template : 'dark';
   const dealId = String(deal._id || deal.id || 'unknown');
 
   const filename   = `${dealId}_${tpl}.mp4`;
@@ -550,15 +586,11 @@ async function generateReel(deal, template = 'dark') {
   }
 
   return reelQueue.add(async () => {
-    logger.info(`[ReelGen] Starting: deal=${dealId} template=${tpl}`);
+    if (fs.existsSync(outputPath)) return { videoUrl, cached: true };
 
-    // Double-check after acquiring queue lock
-    if (fs.existsSync(outputPath)) {
-      return { videoUrl, cached: true };
-    }
+    logger.info(`[ReelGen] Generating: deal=${dealId} template=${tpl}`);
 
     const imgBuffer = await downloadImage(deal.image);
-
     const [scene1, scene2, scene3] = await Promise.all([
       buildScene1(tpl),
       buildScene2(deal, imgBuffer, tpl),
@@ -574,8 +606,7 @@ async function generateReel(deal, template = 'dark') {
 function deleteReelCache(dealId) {
   const id = String(dealId);
   Object.keys(THEMES).forEach((tpl) => {
-    const p = path.join(REELS_DIR, `${id}_${tpl}.mp4`);
-    try { fs.unlinkSync(p); } catch (_) {}
+    try { fs.unlinkSync(path.join(REELS_DIR, `${id}_${tpl}.mp4`)); } catch (_) {}
   });
 }
 

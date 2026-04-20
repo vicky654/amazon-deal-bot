@@ -7,14 +7,32 @@
 
 const BOOK_KEYWORDS = [
   'book', 'books', 'textbook', 'novel', 'paperback', 'hardcover',
-  'ebook', 'comics', 'manga', 'autobiography', 'biography', 'dictionary',
-  'encyclopedia', 'kindle', 'guide book', 'workbook',
+  'ebook', 'e-book', 'comics', 'manga', 'autobiography', 'biography',
+  'dictionary', 'encyclopedia', 'kindle', 'guide book', 'workbook',
+  'author', 'publication', 'publisher', 'edition', 'chapter',
+  'storybook', 'comic book', 'graphic novel', 'audiobook', 'audio book',
 ];
 
+/**
+ * Returns true if the product looks like a book based on title or category.
+ * Exported so it can be used as an early filter before DB writes.
+ */
 function isBook(deal) {
-  const cat   = (deal.category || '').toLowerCase();
-  const title = (deal.title    || '').toLowerCase();
+  const cat   = (deal.category || '').toLowerCase().trim();
+  const title = (deal.title    || '').toLowerCase().trim();
   return BOOK_KEYWORDS.some((k) => cat.includes(k) || title.includes(k));
+}
+
+/**
+ * Normalise a product title for deduplication comparisons.
+ * Lowercase, collapse whitespace, strip punctuation.
+ */
+function normalizeTitle(title) {
+  return (title || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s]/g, '')   // strip punctuation
+    .replace(/\s+/g, ' ');     // collapse whitespace
 }
 
 function isPostedToday(lastPostedAt) {
@@ -58,4 +76,4 @@ function shouldPostDeal(product, dbDeal) {
   return { allow: true, reason: 'ok' };
 }
 
-module.exports = { shouldPostDeal };
+module.exports = { shouldPostDeal, isBook, normalizeTitle };

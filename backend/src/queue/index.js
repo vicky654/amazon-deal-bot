@@ -16,7 +16,7 @@ const PQueue  = _PQueue.default || _PQueue;
 const logger  = require('../../utils/logger');
 const metrics = require('../utils/metrics');
 
-const SCRAPE_CONCURRENCY    = parseInt(process.env.SCRAPE_CONCURRENCY    || '2', 10);
+const SCRAPE_CONCURRENCY    = parseInt(process.env.SCRAPE_CONCURRENCY    || '1', 10);
 const AFFILIATE_CONCURRENCY = parseInt(process.env.AFFILIATE_CONCURRENCY || '1', 10);
 
 let _scrapeQueue    = null;
@@ -26,8 +26,6 @@ function getScrapeQueue() {
   if (!_scrapeQueue) {
     _scrapeQueue = new PQueue({
       concurrency: SCRAPE_CONCURRENCY,
-      intervalCap: SCRAPE_CONCURRENCY,
-      interval: 1000, // Max N starts per second
     });
 
     _scrapeQueue.on('active', () => {

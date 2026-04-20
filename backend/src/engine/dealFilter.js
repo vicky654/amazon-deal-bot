@@ -1,12 +1,8 @@
 /**
  * Deal Filter — Platform-Aware
  *
- * Platform-specific thresholds:
- *   amazon   → 40% discount OR 30% price drop
- *   flipkart → 40% discount
- *   myntra   → 50% discount (fashion standard)
- *   ajio     → 50% discount
- *
+ * Minimum 50% discount on all platforms.
+ * Amazon additionally allows ≥30% price drop vs historical low.
  * All thresholds overridable via env vars.
  */
 
@@ -15,8 +11,8 @@ const logger = require('../../utils/logger');
 const { scoreDeal } = require('./dealScorer');
 
 const THRESHOLDS = {
-  amazon:   { discount: parseInt(process.env.AMAZON_MIN_DISCOUNT   || '40', 10), priceDrop: parseInt(process.env.AMAZON_PRICE_DROP   || '30', 10) },
-  flipkart: { discount: parseInt(process.env.FLIPKART_MIN_DISCOUNT || '40', 10), priceDrop: 0 },
+  amazon:   { discount: parseInt(process.env.AMAZON_MIN_DISCOUNT   || '50', 10), priceDrop: parseInt(process.env.AMAZON_PRICE_DROP || '30', 10) },
+  flipkart: { discount: parseInt(process.env.FLIPKART_MIN_DISCOUNT || '50', 10), priceDrop: 0 },
   myntra:   { discount: parseInt(process.env.MYNTRA_MIN_DISCOUNT   || '50', 10), priceDrop: 0 },
   ajio:     { discount: parseInt(process.env.AJIO_MIN_DISCOUNT     || '50', 10), priceDrop: 0 },
 };
@@ -151,28 +147,18 @@ async function upsertDeal(product, category, dealType, reason) {
   return created;
 }
 
-const DEAL_LIMIT = 20;
+const DEAL_LIMIT = 200;
 
 /**
- * Keep only the latest DEAL_LIMIT deals in MongoDB.
- * Runs after every upsert — cheap because the collection never exceeds ~20 docs.
+ * Prune unposted deals older than 48h. Never deletes posted deals —
+ * PostedLog (TTL 5 days) is the dedup authority, not this collection.
  */
 async function pruneOldDeals() {
   try {
-    const total = await Deal.countDocuments();
-    if (total <= DEAL_LIMIT) return;
-
-    const toKeep = await Deal.find()
-      .sort({ createdAt: -1 })
-      .limit(DEAL_LIMIT)
-      .select('_id')
-      .lean();
-
-    const keepIds = toKeep.map((d) => d._id);
-    const result  = await Deal.deleteMany({ _id: { $nin: keepIds } });
-
+    const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const result = await Deal.deleteMany({ posted: false, createdAt: { $lt: cutoff } });
     if (result.deletedCount > 0) {
-      logger.info(`[Cleanup] Pruned ${result.deletedCount} old deal(s). DB now holds ${DEAL_LIMIT}.`);
+      logger.info(`[Cleanup] Pruned ${result.deletedCount} unposted deal(s) older than 48h.`);
     }
   } catch (err) {
     logger.warn(`[Cleanup] Prune failed: ${err.message}`);
