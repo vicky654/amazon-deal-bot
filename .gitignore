@@ -4,3 +4,27 @@ node_modules
 dist
 build
 .env.local
+
+
+# Chrome / Puppeteer profile
+backend/chrome-profile/
+chrome-profile/
+
+# Debug screenshots/html
+backend/debug/
+
+# Logs
+logs/
+*.log
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Node modules
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db

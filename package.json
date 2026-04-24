@@ -9,11 +9,20 @@
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
     "build": "cd frontend && npm run build"
   },
-  "keywords": ["amazon", "deals", "puppeteer", "telegram", "mongodb"],
+  "keywords": [
+    "amazon",
+    "deals",
+    "puppeteer",
+    "telegram",
+    "mongodb"
+  ],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }
-

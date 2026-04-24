@@ -9,6 +9,9 @@ const CrawlerRun = require('../models/CrawlerRun');
 const Deal       = require('../models/Deal');
 const { getQueueStats }    = require('../queue');
 const { state: cronState } = require('../cronState');
+const { metrics: scraperMetrics }   = require('../scraper/amazon');
+const { metrics: extractorMetrics } = require('../crawler/extractor');
+const antiBot                        = require('../crawler/antiBot');
 const autoMode   = require('../autoMode');
 const telegram   = require('../../telegram');
 const logger     = require('../../utils/logger');
@@ -86,11 +89,12 @@ router.get('/crawler', async (req, res) => {
     res.json({
       // Global runtime counters (set by crawler/index.js)
       crawler: {
-        running:      global.crawlerRunning  ?? cronState.running,
-        lastRun:      global.lastCrawlerRun  ?? cronState.lastRun,
-        dealsScraped: global.dealsScraped    ?? 0,
-        dealsPosted:  global.dealsPosted     ?? 0,
-        lastError:    global.lastCrawlerError ?? null,
+        running:                   global.crawlerRunning            ?? cronState.running,
+        lastRun:                   global.lastCrawlerRun            ?? cronState.lastRun,
+        dealsScraped:              global.dealsScraped              ?? 0,
+        dealsPosted:               global.dealsPosted               ?? 0,
+        lastError:                 global.lastCrawlerError          ?? null,
+        lastSuccessfulTelegramSend: global.lastSuccessfulTelegramSend ?? null,
       },
       status:          (global.crawlerRunning ?? cronState.running) ? 'running' : 'stopped',
       autoMode:        autoMode.state.enabled,
@@ -99,7 +103,7 @@ router.get('/crawler', async (req, res) => {
         running:    cronState.running,
         lastRun:    cronState.lastRun,
         nextRun:    cronState.nextRun,
-        schedule:   process.env.CRON_SCHEDULE || '*/5 * * * *',
+        schedule:   process.env.CRON_SCHEDULE || '*/15 * * * *',
         recentLogs: cronState.logs.slice(0, 10),
       },
       lastDbRun: lastRun ? {
@@ -116,6 +120,15 @@ router.get('/crawler', async (req, res) => {
         unpostedDeals: totalDeals - postedDeals,
       },
       queue: getQueueStats(),
+      skipMetrics: {
+        extractor: extractorMetrics,  // skipped_no_price, enqueued
+        scraper:   scraperMetrics,    // skipped_redirect, skipped_unavailable, skipped_bot_captcha, skipped_dom, success, error_exhausted
+      },
+      antiBot: {
+        stats:           antiBot.stats,
+        blacklisted:     antiBot.getBlacklisted(),
+        budgetRemaining: antiBot.budgetRemaining(),
+      },
       telegram: {
         isTelegramWorking,
         tokenSet:  env.TELEGRAM_TOKEN.set,

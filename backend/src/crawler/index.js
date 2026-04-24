@@ -1,12 +1,11 @@
 /**
- * Multi-Platform Crawler Orchestrator
+ * Amazon India Crawler Orchestrator
  *
  * Flow per cycle:
- *   1. Extract product URLs from all category pages
+ *   1. Extract product URLs from all Amazon category pages (Puppeteer + stealth)
  *   2. Deduplicate via URL cache (skip recently scraped)
  *   3. For each URL: scrape → affiliate link → deal filter → save → Telegram
- *   4. Scraping via p-queue (concurrency 2–3)
- *   5. EarnKaro via affiliate queue (concurrency 1)
+ *   4. Scraping via p-queue (concurrency controlled by SCRAPE_CONCURRENCY)
  *   6. Record CrawlerRun stats
  */
 
@@ -60,13 +59,15 @@ function isAllowedCategory(product) {
 
   return ALLOWED_CATEGORY_KEYWORDS.some((k) => raw.includes(k));
 }
-const { extractLinksFromCategory, CATEGORY_DELAY_MIN_MS, CATEGORY_DELAY_MAX_MS } = require('./extractor');
+const { extractLinksFromCategory, cycleWarmUp, CATEGORY_DELAY_MIN_MS, CATEGORY_DELAY_MAX_MS } = require('./extractor');
+const antiBot = require('./antiBot');
+const { warmUpBrowser, checkLifecycle } = require('../scraper/browser');
 const { scrapeProduct }              = require('../scraper');
 const { generateFinalLink }          = require('../services/linkGenerator');
 const { evaluateDeal, upsertDeal }   = require('../engine/dealFilter');
 const { getScrapeQueue, getQueueStats, clearScrapeQueue } = require('../queue');
 const { shouldPostDeal, isBook, normalizeTitle } = require('../engine/postDecision');
-const { normalizeProduct, extractBrand, isAlreadyPosted, markAsPosted } = require('../engine/dedup');
+const { normalizeProduct, extractBrand, isTitleDuplicate, isAlreadyPosted, markAsPosted, claimInflight, releaseInflight } = require('../engine/dedup');
 const { emit }           = require('../events/emitter');
 const { urlCache }                   = require('../utils/cache');
 const metrics                        = require('../utils/metrics');
@@ -82,12 +83,13 @@ const PUBLIC_URL = (
   'https://deal-system-backend.onrender.com'
 ).replace(/\/$/, '');
 
-const MAX_BRAND_PER_CYCLE = parseInt(process.env.MAX_BRAND_PER_CYCLE || '2', 10);
+const MAX_BRAND_PER_CYCLE = parseInt(process.env.MAX_BRAND_PER_CYCLE || '3', 10);
 
 let _stopFlag            = false;
 let _seenTitles          = new Set();
 let _seenBrands          = new Map();  // brand → post count this cycle
 let _forceSentFirstDeal  = false; // reset each cycle; used by FORCE_FIRST_DEAL=true
+let _consecutiveZeroYield = 0;    // how many back-to-back cycles found 0 fresh URLs
 
 function stopCrawl() {
   _stopFlag = true;
@@ -143,10 +145,7 @@ async function runCrawlCycle() {
     dealsPosted:       0,
     errors:            0,
     byPlatform: {
-      amazon:   { scraped: 0, deals: 0, errors: 0 },
-      flipkart: { scraped: 0, deals: 0, errors: 0 },
-      myntra:   { scraped: 0, deals: 0, errors: 0 },
-      ajio:     { scraped: 0, deals: 0, errors: 0 },
+      amazon: { scraped: 0, deals: 0, errors: 0 },
     },
   };
   const categoryStats = [];
@@ -154,13 +153,35 @@ async function runCrawlCycle() {
   logger.info('═══ Crawl cycle starting ═══');
 
   try {
-    // ── Phase 1: Extract links from all categories ────────────────────────────
-    const urlsByPlatform = { amazon: [], flipkart: [], myntra: [], ajio: [] };
+    // ── Phase 0: Lifecycle check + Session warm-up ────────────────────────────
+    // checkLifecycle → restarts Chrome if page/age limits exceeded (between cycles, never mid-scrape)
+    // warmUpBrowser  → visits Amazon homepage once per browser session (cookies)
+    // cycleWarmUp    → browse + search page every cycle (behavioral trust)
+    const browserRestarted = await checkLifecycle();
+    if (browserRestarted) {
+      logger.info('[Crawler] Browser was restarted by checkLifecycle() — full warm-up chain will run');
+    }
+    await warmUpBrowser();
+    await cycleWarmUp();
 
-    // Shuffle categories each cycle so different products surface each run
-    const shuffledCategories = [...CATEGORIES].sort(() => Math.random() - 0.5);
+    // ── Phase 1: Extract links from selected categories ───────────────────────
+    const urlsByPlatform = { amazon: [] };
 
-    for (const category of shuffledCategories) {
+    // Select 2–4 categories per cycle (rotating subset reduces request patterns)
+    // Skip any category currently blacklisted by the anti-bot module
+    const availableCategories = CATEGORIES.filter(c => !antiBot.isBlacklisted(c.id));
+    const cycleCount          = 2 + Math.floor(Math.random() * 3);  // 2, 3, or 4
+    const selectedCategories  = [...availableCategories]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, Math.min(cycleCount, availableCategories.length));
+
+    const blacklisted = antiBot.getBlacklisted();
+    if (blacklisted.length > 0) {
+      logger.warn(`[Crawler] Skipping blacklisted: ${blacklisted.map(b => `${b.id}(${b.expiresIn})`).join(', ')}`);
+    }
+    logger.info(`[Crawler] Scanning ${selectedCategories.length}/${availableCategories.length} available categories this cycle`);
+
+    for (const category of selectedCategories) {
       if (_stopFlag) { logger.info('[Crawler] Stop flag — exiting category loop'); break; }
       logger.info(`Scanning: [${category.platform}] ${category.name}`);
       let links = [];
@@ -186,7 +207,7 @@ async function runCrawlCycle() {
         currentCategory:    category.name,
         currentPlatform:    category.platform,
         categoriesScanned:  stats.categoriesScanned,
-        totalCategories:    CATEGORIES.length,
+        totalCategories:    selectedCategories.length,
         linksExtracted:     stats.linksExtracted,
         productsScanned:    stats.productsScanned,
         dealsFound:         stats.dealsFound,
@@ -211,7 +232,17 @@ async function runCrawlCycle() {
       logger.info(`[Crawler]   ${plat}: ${urls.length} URLs`);
     }
     if (totalFresh === 0) {
-      logger.warn('[Crawler] ⚠️  0 fresh URLs found — bot detection or empty categories. Nothing to scrape.');
+      _consecutiveZeroYield++;
+      logger.warn(`[Crawler] ⚠️  0 fresh URLs found — bot detection or empty categories. consecutive=${_consecutiveZeroYield}`);
+      if (_consecutiveZeroYield >= 3) {
+        logger.error(
+          `[Scheduler] ⚠⚠⚠ ALERT: ${_consecutiveZeroYield} consecutive crawl cycles returned 0 URLs. ` +
+          `Likely causes: Amazon IP/session block, CAPTCHA, or network failure. ` +
+          `Check backend/debug/ for screenshots. Consider increasing CRON_SCHEDULE interval.`
+        );
+      }
+    } else {
+      _consecutiveZeroYield = 0; // reset counter as soon as any category yields fresh URLs
     }
 
     // ── Phase 2: Scrape + filter + post ──────────────────────────────────────
@@ -228,6 +259,16 @@ async function runCrawlCycle() {
 
     await Promise.allSettled(allPromises);
     await scrapeQueue.onIdle();
+
+    // Low-yield detection — alert when feed would go dark
+    if (stats.dealsPosted === 0 && stats.productsScanned > 0) {
+      logger.warn(
+        `[Crawler] ⚠️ ZERO DEALS POSTED — scanned=${stats.productsScanned} found=${stats.dealsFound}. ` +
+        `All eligible products are in PostedLog (5-day cooldown). ` +
+        `Consider widening category pages or reducing MIN_DEAL_SCORE.`
+      );
+      emit('crawler:low-yield', { type: 'warn', scanned: stats.productsScanned, found: stats.dealsFound });
+    }
 
     // ── Phase 3: Finalise run ─────────────────────────────────────────────────
     const durationMs = Date.now() - startedAt;
@@ -246,6 +287,7 @@ async function runCrawlCycle() {
     metrics.gauge('crawl.last_deals_found', stats.dealsFound);
 
     global.crawlerRunning = false;
+    antiBot.logStats();
     logger.info(
       `═══ Crawl complete (${Math.round(durationMs / 1000)}s) ═══ ` +
       `scanned=${stats.productsScanned} deals=${stats.dealsFound} posted=${stats.dealsPosted} errors=${stats.errors}`
@@ -302,12 +344,12 @@ async function processProduct(url, platform, stats) {
     metrics.increment(`scrape.${platform}.success`);
 
     if (!product || !product.title || !product.price) {
-      logger.warn(`[Scrape] Skipped: missing data — title=${!!product?.title} price=${!!product?.price} url=${url}`);
+      logger.warn(`[Scrape][SKIP:no-data] title=${!!product?.title} price=${!!product?.price} url=${url}`);
       stats.errors++;
       return;
     }
 
-    logger.info(`[Scrape] SCRAPED OK → title="${product.title.slice(0, 60)}" price=₹${product.price ?? 'N/A'} discount=${product.discount ?? 'N/A'}%`);
+    logger.info(`[Scrape][OK] "${product.title.slice(0, 60)}" price=₹${product.price} disc=${product.discount ?? '?'}% img=${!!product.image} url=${url}`);
 
     // ── FORCE_FIRST_DEAL bypass (set env var for testing only) ───────────────
     if (process.env.FORCE_FIRST_DEAL === 'true' && !_forceSentFirstDeal && product.title && product.price) {
@@ -328,49 +370,54 @@ async function processProduct(url, platform, stats) {
     }
 
     // ── EARLY GATE 0: Category allowlist ─────────────────────────────────────
-    // Only process: Electronics, Shoes, Clothing, Beauty, Fitness.
-    // Blocks grocery, books, kitchen, toys, automotive, etc.
     if (!isAllowedCategory(product)) {
-      logger.info(`[Filter] Skipped category "${product.category || 'unknown'}": "${product.title.slice(0, 60)}"`);
+      logger.info(`[Filter][SKIP:category] cat="${product.category || 'none'}" title="${product.title.slice(0, 60)}"`);
       metrics.increment('filter.category_skip');
       return;
     }
 
     // ── EARLY GATE 1: Book filter ─────────────────────────────────────────────
     if (isBook(product)) {
-      logger.info(`[Filter] Skipped book item: "${product.title.slice(0, 60)}"`);
+      logger.info(`[Filter][SKIP:book] "${product.title.slice(0, 60)}"`);
       metrics.increment('filter.book_skip');
       return;
     }
 
-    // ── EARLY GATE 2: Title deduplication ────────────────────────────────────
-    // In-memory Set catches duplicates within the current crawl cycle.
-    // URL dedup (urlCache) already handles exact URL repeats; this catches
-    // same product appearing under different URLs (e.g. variant pages).
+    // ── EARLY GATE 2a: Exact title dedup within this cycle ───────────────────
     const titleKey = normalizeTitle(product.title);
     if (_seenTitles.has(titleKey)) {
-      logger.info(`[Filter] Skipped duplicate: "${product.title.slice(0, 60)}"`);
+      logger.info(`[Filter][SKIP:title-exact] "${product.title.slice(0, 60)}"`);
       metrics.increment('filter.duplicate_skip');
       return;
     }
     _seenTitles.add(titleKey);
 
-    // ── EARLY GATE 3: 5-day PostedLog duplicate check ────────────────────────
-    // Uses compound (productId, platform) index — survives pruneOldDeals.
-    // Fails open on DB error so infra flakiness never silences legitimate deals.
+    // ── EARLY GATE 2b: Fuzzy title similarity (cross-cycle, last 200 posted) ──
+    if (isTitleDuplicate(product.title)) {
+      logger.info(`[Filter][SKIP:title-fuzzy ≥${process.env.TITLE_SIMILARITY_THRESHOLD || 0.85}] "${product.title.slice(0, 60)}"`);
+      metrics.increment('filter.title_similarity_skip');
+      return;
+    }
+
+    // ── EARLY GATE 3: Concurrency guard + 5-day PostedLog check ─────────────
     const { productId } = normalizeProduct(product);
-    if (await isAlreadyPosted(productId, platform)) {
-      logger.info(`[Filter] Skipped duplicate (5-day log) [${productId}]: "${product.title.slice(0, 60)}"`);
+    if (!claimInflight(productId, platform)) {
+      logger.info(`[Filter][SKIP:in-flight] id=${productId} "${product.title.slice(0, 60)}"`);
+      metrics.increment('filter.inflight_skip');
+      return;
+    }
+    try {
+    if (await isAlreadyPosted(productId, platform, product.title)) {
+      logger.info(`[Filter][SKIP:posted-log] id=${productId} "${product.title.slice(0, 60)}"`);
       metrics.increment('filter.db_duplicate_skip');
       return;
     }
 
     // ── EARLY GATE 4: Brand frequency cap ────────────────────────────────────
-    // Limits same brand to MAX_BRAND_PER_CYCLE posts per crawl cycle.
     const brand     = extractBrand(product.title);
     const brandHits = _seenBrands.get(brand) || 0;
     if (brandHits >= MAX_BRAND_PER_CYCLE) {
-      logger.info(`[Filter] Brand cap (${brand} × ${brandHits}): "${product.title.slice(0, 60)}"`);
+      logger.info(`[Filter][SKIP:brand-cap] brand=${brand} hits=${brandHits}/${MAX_BRAND_PER_CYCLE} "${product.title.slice(0, 60)}"`);
       metrics.increment('filter.brand_cap_skip');
       return;
     }
@@ -402,14 +449,16 @@ async function processProduct(url, platform, stats) {
     const deal = await upsertDeal(product, platform, dealType, reason);
 
     // Smart rules gate + Auto Mode + score check
-    const MIN_SCORE = parseInt(process.env.MIN_DEAL_SCORE || '30', 10);
+    const MIN_SCORE = parseInt(process.env.MIN_DEAL_SCORE || '20', 10);
     const scoreMet  = (deal.score || 0) >= MIN_SCORE;
     const { allow, reason: postReason } = shouldPostDeal(product, deal);
 
+    logger.info(`[PostGate] score=${deal.score}/${MIN_SCORE} autoMode=${autoMode.state.enabled} allow=${allow}/${postReason} "${deal.title?.slice(0,50)}"`);
+
     if (!autoMode.state.enabled) {
-      logger.warn(`[Crawler] ⛔ AUTO MODE IS OFF — deal saved but NOT posted to Telegram: "${deal.title?.slice(0,50)}"`);
+      logger.warn(`[PostGate][SKIP:auto-mode-off] "${deal.title?.slice(0,50)}"`);
     } else if (!scoreMet) {
-      logger.warn(`[Crawler] ⛔ Score too low (${deal.score} < ${MIN_SCORE}) — NOT posted: "${deal.title?.slice(0,50)}"`);
+      logger.warn(`[PostGate][SKIP:score-low] score=${deal.score} min=${MIN_SCORE} "${deal.title?.slice(0,50)}"`);
     } else if (!allow) {
       emit('crawler:deal-skipped', {
         type:     'skipped',
@@ -437,15 +486,16 @@ async function processProduct(url, platform, stats) {
           'steps.telegram.done': true,
           'steps.telegram.at':   now,
         });
-        // Write to PostedLog — idempotent upsert, retries once, logs CRITICAL on failure
+        // Write to PostedLog — 3 retries, dynamic cooldown by score, CRITICAL log on all-fail
         const { productId: postedProductId } = normalizeProduct(deal);
-        await markAsPosted(postedProductId, deal.platform || platform, normalizeTitle(deal.title));
+        await markAsPosted(postedProductId, deal.platform || platform, normalizeTitle(deal.title), deal.score || 0);
         // Increment brand counter for this cycle
         const postedBrand = extractBrand(deal.title);
         _seenBrands.set(postedBrand, (_seenBrands.get(postedBrand) || 0) + 1);
         stats.dealsPosted++;
         global.dealsPosted = (global.dealsPosted || 0) + 1;
         metrics.increment(`deals.${platform}.posted`);
+        global.lastSuccessfulTelegramSend = new Date().toISOString();
         logger.info(`[Telegram] ✅ SENT OK — "${deal.title.slice(0, 50)}" [${postReason}]`);
         emit('crawler:deal-posted', {
           type:     'posted',
@@ -470,6 +520,10 @@ async function processProduct(url, platform, stats) {
         }).catch(() => {});
       }
     }
+    } finally {
+      // Release in-flight claim — runs on every exit path (return, throw, or fall-through)
+      releaseInflight(productId, platform);
+    }
   } catch (error) {
     stats.errors++;
     if (stats.byPlatform[platform]) stats.byPlatform[platform].errors++;
@@ -480,28 +534,31 @@ async function processProduct(url, platform, stats) {
 
 // ─── TELEGRAM FORMATTER ───────────────────────────────────────────────────────
 
-async function postDealToTelegram(deal) {
-  const PLATFORM_EMOJI = {
-    amazon:   '🛒',
-    flipkart: '🟡',
-    myntra:   '👗',
-    ajio:     '👠',
-  };
+const { buildAffiliateUrl, isValidAffiliateUrl } = require('../affiliate/amazon');
 
-  const emoji       = PLATFORM_EMOJI[deal.platform] || '🛍️';
-  const redirectUrl = `${PUBLIC_URL}/r/${deal._id}`;
+async function postDealToTelegram(deal) {
+  const postUrl = buildAffiliateUrl(deal);
+
+  if (!postUrl) {
+    throw new Error(`[Telegram] No valid affiliate URL for deal ${deal._id} (ASIN: ${deal.asin})`);
+  }
+  if (!isValidAffiliateUrl(postUrl)) {
+    throw new Error(`[Telegram] Built URL failed validation for deal ${deal._id}: ${postUrl}`);
+  }
+
+  logger.info(`[Telegram] Using affiliate URL: ${postUrl}`);
 
   const caption = telegram.formatDealText(
     deal.title,
     deal.price,
-    redirectUrl,        // always use tracked redirect link
+    postUrl,
     deal.originalPrice,
     deal.discount,
-    emoji,
-    deal.platform,
+    '🛒',
+    'amazon',
   );
 
-  await telegram.sendToTelegram(deal.image, caption, redirectUrl);
+  await telegram.sendToTelegram(deal.image, caption, postUrl);
 }
 
 module.exports = {

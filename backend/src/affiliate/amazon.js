@@ -40,4 +40,43 @@ function isAmazonUrl(url) {
   return /amazon\.(in|com)/i.test(url) && (/\/dp\//.test(url) || /\/gp\/product\//.test(url));
 }
 
-module.exports = { buildAmazonAffiliateLink, extractAsin, isAmazonUrl };
+/**
+ * Build a clean affiliate URL from a deal object.
+ * Priority: use stored affiliateLink if valid, otherwise rebuild from ASIN/URL.
+ *
+ * @param {object} deal  Deal document from DB (has asin, affiliateLink, finalLink, etc.)
+ * @returns {string|null} Clean affiliate URL or null if ASIN can't be found
+ */
+function buildAffiliateUrl(deal) {
+  // Already a valid affiliate link — use it directly
+  if (deal.affiliateLink && isValidAffiliateUrl(deal.affiliateLink)) {
+    return deal.affiliateLink;
+  }
+
+  // Rebuild from ASIN (most reliable)
+  if (deal.asin && /^[A-Z0-9]{10}$/i.test(deal.asin)) {
+    return `https://www.amazon.in/dp/${deal.asin.toUpperCase()}?tag=${TRACKING_ID}`;
+  }
+
+  // Extract ASIN from any stored URL
+  const sourceUrl = deal.finalLink || deal.originalLink || deal.link || '';
+  const asin = extractAsin(sourceUrl);
+  if (asin) return `https://www.amazon.in/dp/${asin}?tag=${TRACKING_ID}`;
+
+  return null;
+}
+
+/**
+ * Validate that a URL is a proper Amazon affiliate link.
+ * Must have: amazon.in domain, /dp/ path, tag= param.
+ */
+function isValidAffiliateUrl(url) {
+  if (!url) return false;
+  return (
+    /amazon\.in/i.test(url) &&
+    /\/dp\/[A-Z0-9]{10}/i.test(url) &&
+    url.includes('tag=')
+  );
+}
+
+module.exports = { buildAmazonAffiliateLink, buildAffiliateUrl, isValidAffiliateUrl, extractAsin, isAmazonUrl };

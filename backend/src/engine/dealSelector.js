@@ -1,26 +1,32 @@
 /**
  * Deal Selector — Batch / Scheduled Posting
  *
- * Used when you want to pick N deals to post in one batch (e.g. scheduled job,
- * manual trigger). NOT used by the streaming crawler — that posts inline.
+ * Strict anti-duplication rules (any match = reject):
+ *   - Same productId in PostedLog
+ *   - Same normalized URL
+ *   - Title similarity ≥ SIMILARITY_THRESHOLD (default 85%)
  *
- * Selection mix:
- *   40% trending  — highest score deals
- *   30% fresh     — most recently scraped
- *   30% random    — shuffle picks, forces variety
+ * FAIL-SAFE: If PostedLog is unavailable → return [] (never fallback to old deals).
+ * FALLBACK:  If pool is thin → widen score floor to 15 (never reuse posted deals).
  *
- * Guarantees:
- *   - Never picks a product in PostedLog (5-day TTL window)
- *   - Max MAX_BRAND_PER_BATCH deals per brand in one batch
- *   - Score includes ±8 jitter so rotation doesn't repeat in a fixed order
+ * Selection mix: 40% trending / 30% fresh / 30% random
+ * Brand cap: weighted — slots distributed evenly across unique brands
  */
 
 const Deal      = require('../models/Deal');
 const PostedLog = require('../models/PostedLog');
-const { scoreDeal } = require('./dealScorer');
-const { extractBrand } = require('./dedup');
+const { scoreDeal }            = require('./dealScorer');
+const {
+  extractBrand,
+  normalizeProduct,
+  normalizeTitleForSimilarity,
+  titleSimilarity,
+} = require('./dedup');
 
-const MAX_BRAND_PER_BATCH = parseInt(process.env.MAX_BRAND_PER_BATCH || '2', 10);
+const MIN_BRAND_DIVERSITY   = parseInt(process.env.MIN_BRAND_DIVERSITY        || '3',    10);
+const SIMILARITY_THRESHOLD  = parseFloat(process.env.TITLE_SIMILARITY_THRESHOLD || '0.85');
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
 
 function shuffle(arr) {
   const a = [...arr];
@@ -43,58 +49,115 @@ function takeUnique(pool, n, picked) {
   return out;
 }
 
-function applyBrandCap(deals, cap) {
+/**
+ * Weighted brand budget.
+ * Max per brand = floor(totalLimit / max(MIN_BRAND_DIVERSITY, uniqueBrands)).
+ * Ensures feed always has ≥ MIN_BRAND_DIVERSITY different brands.
+ */
+function applyBrandBudget(deals, totalLimit) {
+  const uniqueBrands = new Set(deals.map((d) => extractBrand(d.title)));
+  const brandBudget  = Math.max(1, Math.floor(totalLimit / Math.max(MIN_BRAND_DIVERSITY, uniqueBrands.size)));
+
   const brandCount = new Map();
   return deals.filter((d) => {
     const brand = extractBrand(d.title);
     const count = brandCount.get(brand) || 0;
-    if (count >= cap) return false;
+    if (count >= brandBudget) return false;
     brandCount.set(brand, count + 1);
     return true;
   });
 }
 
 /**
- * Fetch deals not in PostedLog, apply 40/30/30 selection.
+ * Title similarity filter against a set of already-seen normalized titles.
+ * O(candidates × postedTitles) — acceptable for ≤ 200 posted titles.
+ */
+function isTitleDuplicateOf(title, postedTitles) {
+  const norm = normalizeTitleForSimilarity(title);
+  if (!norm) return false;
+  for (const posted of postedTitles) {
+    if (titleSimilarity(norm, posted) >= SIMILARITY_THRESHOLD) return true;
+  }
+  return false;
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+/**
+ * Fetch unique, never-posted deals from DB.
+ *
+ * FAIL-SAFE:
+ *   - PostedLog unavailable → return [] (never post stale deals to fill quota)
+ *   - Pool too small at minScore → widen to 15 (never reuse posted deals)
+ *   - Pool still empty → return [] (explicit empty, no fallback to old deals)
  *
  * @param {object} opts
- * @param {string} [opts.platform]      Filter by platform (optional)
- * @param {number} [opts.limit=10]      Total deals to return
- * @param {number} [opts.minScore=25]   Minimum deal score to consider
+ * @param {string} [opts.platform]     Filter by platform
+ * @param {number} [opts.limit=10]     Max deals to return
+ * @param {number} [opts.minScore=25]  Min score; auto-lowered to 15 if pool thin
  */
 async function getFreshDeals({ platform, limit = 10, minScore = 25 } = {}) {
-  // Build set of product IDs blocked by PostedLog
-  const blocked = await PostedLog
-    .find(platform ? { platform } : {})
-    .select('productId platform')
-    .lean();
-  const blockedKeys = new Set(blocked.map((l) => `${l.productId}:${l.platform}`));
+  // ── Step 1: Load PostedLog blocklist ─────────────────────────────────────
+  let blockedKeys;
+  let postedTitleKeys;
 
-  // Fetch candidate deals from DB (over-fetch to allow filtering)
-  const query = { price: { $gt: 0 }, score: { $gte: minScore } };
-  if (platform) query.platform = platform;
+  try {
+    const blocked = await PostedLog
+      .find(platform ? { platform } : {})
+      .select('productId platform titleKey')
+      .lean();
 
-  const candidates = await Deal.find(query)
-    .sort({ score: -1, createdAt: -1 })
-    .limit(limit * 8)
-    .lean();
+    blockedKeys    = new Set(blocked.map((l) => `${l.productId}:${l.platform}`));
+    postedTitleKeys = blocked
+      .map((l) => normalizeTitleForSimilarity(l.titleKey || ''))
+      .filter(Boolean);
+  } catch (err) {
+    // FAIL CLOSED: PostedLog unavailable — return empty rather than risk repeats
+    require('../../utils/logger').error(
+      `[DealSelector] PostedLog query failed: ${err.message}. Returning [] to prevent duplicate posts.`
+    );
+    return [];
+  }
 
-  // Filter out blocked products
-  const pool = candidates.filter((d) => {
-    const pid = d.asin ? d.asin.toUpperCase() : null;
-    if (!pid) return true; // non-ASIN: rely on titleKey dedup in crawler
-    return !blockedKeys.has(`${pid}:${d.platform}`);
-  });
+  // ── Step 2: Fetch candidates from Deal collection ─────────────────────────
+  async function fetchPool(scoreFloor) {
+    const query = { price: { $gt: 0 }, score: { $gte: scoreFloor } };
+    if (platform) query.platform = platform;
 
+    const candidates = await Deal.find(query)
+      .sort({ score: -1, createdAt: -1 })
+      .limit(limit * 10)  // over-fetch to survive similarity filtering
+      .lean();
+
+    return candidates.filter((d) => {
+      // Check 1: productId in PostedLog
+      const { productId } = normalizeProduct(d);
+      if (blockedKeys.has(`${productId}:${d.platform}`)) return false;
+
+      // Check 2: Title similarity against posted titles
+      if (postedTitleKeys.length > 0 && isTitleDuplicateOf(d.title, postedTitleKeys)) return false;
+
+      return true;
+    });
+  }
+
+  let pool = await fetchPool(minScore);
+
+  // Widen score floor if pool is thin — NEVER reuse posted deals
+  if (pool.length < limit && minScore > 15) {
+    pool = await fetchPool(15);
+  }
+
+  // FAIL-SAFE: no new deals → return empty (never fallback to old deals)
   if (pool.length === 0) return [];
 
-  // Apply score jitter for rotation variety
+  // ── Step 3: Score with jitter for rotation variety ────────────────────────
   const scored = pool.map((d) => ({
     ...d,
-    _liveScore: scoreDeal(d, d.dealType, true),
+    _liveScore: scoreDeal(d, d.dealType, true),  // ±8 randomness
   }));
 
-  // 40% trending, 30% fresh, 30% random
+  // ── Step 4: 40% trending / 30% fresh / 30% random ────────────────────────
   const nTrending = Math.ceil(limit * 0.4);
   const nFresh    = Math.ceil(limit * 0.3);
   const nRandom   = limit - nTrending - nFresh;
@@ -110,18 +173,19 @@ async function getFreshDeals({ platform, limit = 10, minScore = 25 } = {}) {
     ...takeUnique(byRand,  nRandom,   picked),
   ];
 
-  // Apply brand cap, then shuffle final list so order varies each call
-  return shuffle(applyBrandCap(selected, MAX_BRAND_PER_BATCH));
+  // ── Step 5: Brand budget + final shuffle ──────────────────────────────────
+  return shuffle(applyBrandBudget(selected, limit));
 }
 
 /**
- * Only deletes unposted deals older than 48h.
- * Posted deals are never touched — PostedLog is the dedup authority.
+ * Safe prune — only removes UNPOSTED deals older than 48h.
+ * Posted deals are never deleted; PostedLog is the dedup authority.
+ * @returns {number} count of pruned documents
  */
 async function safePruneDeals() {
   const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
-  const result = await Deal.deleteMany({ posted: false, createdAt: { $lt: cutoff } });
-  return result.deletedCount;
+  const { deletedCount } = await Deal.deleteMany({ posted: false, createdAt: { $lt: cutoff } });
+  return deletedCount;
 }
 
 module.exports = { getFreshDeals, safePruneDeals };

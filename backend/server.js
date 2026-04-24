@@ -16,11 +16,12 @@ const earnkaroRouter      = require('./src/routes/earnkaro');
 const reelsRouter         = require('./src/routes/reels');
 const systemRouter        = require('./src/routes/system');
 const debugRouter         = require('./src/routes/debug');
+const repostDebugRouter   = require('./src/routes/repost');
 const redirectRouter      = require('./src/routes/redirect');
 const authRouter          = require('./src/routes/auth');
 const dashboardRouter     = require('./src/routes/dashboard');
 const verifyToken         = require('./src/middleware/auth');
-const { closeBrowser }    = require('./src/scraper/browser');
+const { getBrowser, closeBrowser, clearChromeLocks, killLingeringChrome, CHROME_PROFILE_DIR } = require('./src/scraper/browser');
 const { getQueueStats }   = require('./src/queue');
 const earnkaroAutoRefresh = require('./src/services/earnkaroAutoRefresh');
 const { state: cronState, addLog: cronLog, parseIntervalMinutes } = require('./src/cronState');
@@ -76,7 +77,7 @@ if (missingEnv.length) {
 
 const PORT          = process.env.PORT          || 5000;
 const MONGODB_URI   = process.env.MONGODB_URI   || 'mongodb://localhost:27017/deal-system';
-const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/5 * * * *'; // every 5 min
+const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/15 * * * *'; // every 15 min
 
 /*
  * ─── APP ──────────────────────────────────────────────────────────────────────
@@ -207,6 +208,7 @@ app.use('/api/earnkaro', earnkaroRouter);
 app.use('/api/reels',    reelsRouter);
 app.use('/api/system',   systemRouter);
 app.use('/api/debug',    debugRouter);
+app.use('/api/debug/repost', repostDebugRouter);
 app.use('/',             healthRouter);
 
 // ── Legacy endpoints (frontend currently calls these) ─────────────────────────
@@ -311,10 +313,29 @@ app.use((err, req, res, _next) => {
  */
 
 async function shutdown(signal) {
-  logger.info(`${signal} received — shutting down`);
+  logger.info(`[Server] ${signal} received — shutting down cleanly`);
   earnkaroAutoRefresh.stop();
-  await closeBrowser();
-  await mongoose.connection.close();
+  if (process.env.REPOST_ENABLED === 'true') {
+    try {
+      const repost = require('./src/repost');
+      await repost.stop();
+      logger.info('[Server] Repost engine stopped');
+    } catch (_) {}
+  }
+  // Close browser first — this flushes the profile to disk cleanly and prevents
+  // SingletonLock files from persisting after restart.
+  try {
+    await closeBrowser(`graceful shutdown (${signal})`);
+    logger.info('[Server] Browser closed');
+  } catch (e) {
+    logger.warn(`[Server] Browser close error (non-fatal): ${e.message}`);
+  }
+  try {
+    await mongoose.connection.close();
+    logger.info('[Server] MongoDB connection closed');
+  } catch (e) {
+    logger.warn(`[Server] MongoDB close error (non-fatal): ${e.message}`);
+  }
   process.exit(0);
 }
 
@@ -327,11 +348,50 @@ process.on('SIGINT',  () => shutdown('SIGINT'));
 
 // Only bind the port when this file is run directly (not when required by tests)
 if (require.main === module) {
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     logger.info(`Server running on port ${PORT}`);
     logger.info(`Cron: ${CRON_SCHEDULE} (interval ~${parseIntervalMinutes(CRON_SCHEDULE)} min)`);
     logger.info(`CORS: ${rawOrigins ? `restricted to ${rawOrigins}` : 'open (*)'}`);
     telegram.sendTestMessage().catch(() => {});
+
+    // ── Browser self-test ──────────────────────────────────────────────────
+    // Runs at startup to catch profile lock / binary issues immediately,
+    // before the first cron tick (which would fail silently 15 min later).
+    try {
+      logger.info('[Boot] Running browser self-test…');
+      // Clean any lock files from a previous unclean shutdown BEFORE the test
+      await killLingeringChrome();
+      clearChromeLocks(CHROME_PROFILE_DIR);
+
+      const testBrowser = await getBrowser();
+      const testPage    = await testBrowser.newPage();
+      await testPage.goto('about:blank', { timeout: 10000 });
+      await testPage.close();
+      // Browser stays alive — reused by the crawler on every cron tick.
+      // It will only restart when: page limit hit, age limit hit, or crash detected.
+      logger.info('[Boot] ✅ Browser self-test PASSED — Chromium is running and will stay persistent');
+    } catch (selfTestErr) {
+      const msg = (selfTestErr && (selfTestErr.message || selfTestErr.toString())) || 'unknown';
+      logger.error(`[Boot] ❌ Browser self-test FAILED: ${msg}`);
+      logger.error('[Boot] The crawler will NOT run until browser launch is fixed.');
+      logger.error('[Boot] Checklist:');
+      logger.error(`[Boot]   1. Delete lock files:  del /f "${CHROME_PROFILE_DIR}\\Singleton*"`);
+      logger.error(`[Boot]   2. Kill Chrome:        taskkill /F /IM chrome.exe`);
+      logger.error('[Boot]   3. Set HEADLESS=false and run again to see Chrome error dialog');
+      logger.error('[Boot]   4. If all else fails, delete chrome-profile/ and restart');
+      // Do not process.exit() — keep the server up so /api/debug/crawler is reachable
+    }
+    // ── Telegram repost engine ─────────────────────────────────────────────
+    if (process.env.REPOST_ENABLED === 'true') {
+      try {
+        const repost = require('./src/repost');
+        await repost.start();
+      } catch (repostErr) {
+        logger.error(`[Boot] Repost engine failed to start: ${repostErr.message}`);
+        // Non-fatal — server stays up, scraper continues working
+      }
+    }
+
     // EarnKaro auto-refresh disabled — scraper is Amazon-only (no EarnKaro needed)
     // earnkaroAutoRefresh.start();
 
@@ -346,7 +406,9 @@ if (require.main === module) {
         const url  = `${SELF_URL}/health`;
         const lib  = url.startsWith('https') ? https : http;
         const req  = lib.get(url, (res) => {
-          logger.debug(`[KeepAlive] /health → ${res.statusCode}`);
+          res.statusCode === 200
+            ? logger.debug('[KeepAlive] Self ping OK')
+            : logger.warn(`[KeepAlive] Self ping → ${res.statusCode}`);
         });
         req.on('error', (e) => logger.warn(`[KeepAlive] ping failed: ${e.message}`));
         req.end();

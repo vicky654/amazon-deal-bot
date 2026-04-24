@@ -1,9 +1,13 @@
 /**
  * Deal Filter — Platform-Aware
  *
- * Minimum 50% discount on all platforms.
- * Amazon additionally allows ≥30% price drop vs historical low.
- * All thresholds overridable via env vars.
+ * A product qualifies (any rule matches):
+ *   Rule 1  Direct discount tag   ≥ AMAZON_MIN_DISCOUNT% (default 40%)
+ *   Rule 2a Computed discount      ≥ threshold %
+ *   Rule 2b Absolute price drop    ≥ AMAZON_MIN_PRICE_DROP_RS (default ₹500)
+ *   Rule 3  Historical price drop  ≥ AMAZON_PRICE_DROP% vs lowest stored price (Amazon only)
+ *
+ * All thresholds are overridable via env vars.
  */
 
 const Deal   = require('../models/Deal');
@@ -11,10 +15,10 @@ const logger = require('../../utils/logger');
 const { scoreDeal } = require('./dealScorer');
 
 const THRESHOLDS = {
-  amazon:   { discount: parseInt(process.env.AMAZON_MIN_DISCOUNT   || '50', 10), priceDrop: parseInt(process.env.AMAZON_PRICE_DROP || '30', 10) },
-  flipkart: { discount: parseInt(process.env.FLIPKART_MIN_DISCOUNT || '50', 10), priceDrop: 0 },
-  myntra:   { discount: parseInt(process.env.MYNTRA_MIN_DISCOUNT   || '50', 10), priceDrop: 0 },
-  ajio:     { discount: parseInt(process.env.AJIO_MIN_DISCOUNT     || '50', 10), priceDrop: 0 },
+  amazon:   { discount: parseInt(process.env.AMAZON_MIN_DISCOUNT   || '40', 10), priceDrop: parseInt(process.env.AMAZON_PRICE_DROP || '30', 10), priceDropRs: parseInt(process.env.AMAZON_MIN_PRICE_DROP_RS || '500', 10) },
+  flipkart: { discount: parseInt(process.env.FLIPKART_MIN_DISCOUNT || '50', 10), priceDrop: 0, priceDropRs: 0 },
+  myntra:   { discount: parseInt(process.env.MYNTRA_MIN_DISCOUNT   || '50', 10), priceDrop: 0, priceDropRs: 0 },
+  ajio:     { discount: parseInt(process.env.AJIO_MIN_DISCOUNT     || '50', 10), priceDrop: 0, priceDropRs: 0 },
 };
 
 /**
@@ -36,14 +40,24 @@ async function evaluateDeal(product) {
     };
   }
 
-  // ── Rule 2: Computed discount from prices ────────────────────────────────
+  // ── Rule 2: Computed discount OR absolute price drop ────────────────────
   if (price && originalPrice && originalPrice > price) {
-    const computed = Math.round(((originalPrice - price) / originalPrice) * 100);
+    const computed     = Math.round(((originalPrice - price) / originalPrice) * 100);
+    const absoluteDrop = Math.round(originalPrice - price);
+
     if (computed >= threshold.discount) {
       return {
         shouldPost: true,
-        reason: `${computed}% off (computed, ≥ ${threshold.discount}% threshold)`,
+        reason:   `${computed}% off (computed, ≥ ${threshold.discount}% threshold)`,
         dealType: 'discount',
+      };
+    }
+
+    if (threshold.priceDropRs > 0 && absoluteDrop >= threshold.priceDropRs) {
+      return {
+        shouldPost: true,
+        reason:   `₹${absoluteDrop} price drop (≥ ₹${threshold.priceDropRs} threshold)`,
+        dealType: 'price-drop',
       };
     }
   }
@@ -107,6 +121,14 @@ async function upsertDeal(product, category, dealType, reason) {
     existing.category      = category      || existing.category;
     existing.dealType      = dealType      || existing.dealType;
     existing.filterReason  = reason;
+
+    // Always recalculate score so a better discount on re-scrape is reflected.
+    // Without this, a deal first seen at 35% off keeps a low score forever,
+    // and the MIN_DEAL_SCORE gate silently blocks it even when it's now 60% off.
+    existing.score = scoreDeal(
+      { platform: existing.platform, price, originalPrice: originalPrice || existing.originalPrice, discount: discount || existing.discount },
+      dealType || existing.dealType,
+    );
 
     existing.priceHistory.push(priceEntry);
     if (existing.priceHistory.length > 50) existing.priceHistory.shift();
