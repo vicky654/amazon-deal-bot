@@ -41,12 +41,24 @@ async function request(path, options = {}) {
 // ── Deals ─────────────────────────────────────────────────────────────────────
 
 export const dealsApi = {
-  /** @param {{ limit?: number, platform?: string, posted?: boolean, sort?: string }} params */
+  /** @param {{ limit?: number, platform?: string, posted?: boolean, sort?: string, category?: string, minScore?: number, isVerified?: boolean }} params */
   list(params = {}) {
     const qs = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)])
     ).toString();
     return request(`/api/deals${qs ? `?${qs}` : ''}`);
+  },
+
+  trending() {
+    return request('/api/deals/trending');
+  },
+
+  lowestEver() {
+    return request('/api/deals/lowest-ever');
+  },
+
+  history(asin) {
+    return request(`/api/deals/history/${asin}`);
   },
 
   analytics() {

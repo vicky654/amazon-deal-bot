@@ -100,24 +100,94 @@ router.get('/analytics', async (req, res, next) => {
   }
 });
 
-// GET /api/deals — always returns max 20, newest first
+// GET /api/deals — paginated, filterable, sortable
 router.get('/', async (req, res, next) => {
   try {
-    const platform = req.query.platform || null;
-    const posted   = req.query.posted !== undefined ? req.query.posted === 'true' : null;
-    const sortBy   = req.query.sort === 'clicks' ? { clicks: -1 } : { createdAt: -1 };
-    const limit    = Math.min(parseInt(req.query.limit || '20', 10), 50);
+    const { platform, posted, sort, limit = 20, category, minScore, isVerified } = req.query;
+    const sortBy = sort === 'clicks' ? { clicks: -1 } : sort === 'score' ? { dealScore: -1 } : { createdAt: -1 };
+    const maxLimit = Math.min(parseInt(limit, 10), 100);
 
     const filter = {};
     if (platform) filter.platform = platform;
-    if (posted !== null) filter.posted = posted;
+    if (posted !== undefined) filter.posted = posted === 'true';
+    if (category) filter.category = category;
+    if (minScore) filter.dealScore = { $gte: parseInt(minScore, 10) };
+    if (isVerified === 'true') filter.isVerifiedDeal = true;
 
     const deals = await Deal.find(filter)
       .sort(sortBy)
-      .limit(limit)
+      .limit(maxLimit)
       .lean();
 
     res.json({ success: true, count: deals.length, deals });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/deals/trending — Highest score + verified deals
+router.get('/trending', async (req, res, next) => {
+  try {
+    const deals = await Deal.find({ dealScore: { $gte: 70 } })
+      .sort({ dealScore: -1, clicks: -1 })
+      .limit(20)
+      .lean();
+    res.json({ success: true, deals });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/deals/lowest-ever — Deals that hit their historical low
+router.get('/lowest-ever', async (req, res, next) => {
+  try {
+    // We can find deals where price <= lowestPrice
+    const deals = await Deal.find({
+      $expr: { $lte: ['$price', '$lowestPrice'] },
+      lowestPrice: { $exists: true, $ne: null }
+    })
+    .sort({ dealScore: -1, createdAt: -1 })
+    .limit(20)
+    .lean();
+    res.json({ success: true, deals });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/deals/search — keyword/brand search
+router.get('/search', async (req, res, next) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ error: 'Search query required' });
+
+    const deals = await Deal.find({
+      $or: [
+        { title: { $regex: q, $options: 'i' } },
+        { brand: { $regex: q, $options: 'i' } },
+        { category: { $regex: q, $options: 'i' } },
+        { asin: q.toUpperCase() }
+      ]
+    })
+    .sort({ dealScore: -1 })
+    .limit(50)
+    .lean();
+
+    res.json({ success: true, count: deals.length, deals });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/deals/history/:asin — get granular price history
+router.get('/history/:asin', async (req, res, next) => {
+  try {
+    const PriceHistory = require('../models/PriceHistory');
+    const history = await PriceHistory.find({ asin: req.params.asin })
+      .sort({ timestamp: 1 })
+      .limit(100)
+      .lean();
+    res.json({ success: true, history });
   } catch (err) {
     next(err);
   }

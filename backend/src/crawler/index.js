@@ -74,6 +74,8 @@ const metrics                        = require('../utils/metrics');
 const Deal                           = require('../models/Deal');
 const CrawlerRun                     = require('../models/CrawlerRun');
 const telegram                       = require('../../telegram');
+const { recordPricePoint }           = require('../services/priceEngine');
+const { calculateDealScore, isVerified } = require('../services/scoringEngine');
 const logger                         = require('../../utils/logger');
 const autoMode                       = require('../autoMode');
 
@@ -391,8 +393,28 @@ async function processProduct(url, platform, stats) {
     console.log('[Amazon][OK]');
     logger.info(`[Scrape][OK] "${product.title.slice(0, 60)}" price=₹${product.price} disc=${product.discount ?? '?'}% img=${!!product.image} url=${url}`);
 
-    const { productId } = normalizeProduct(product);
+    // ── SMART DEAL FLOW ──
     try {
+      const { productId } = normalizeProduct(product);
+
+      // 1. Record price point & update historical stats
+      const historyStats = await recordPricePoint(product.asin, product.price, product.originalPrice, platform);
+      
+      // 2. Enrich product with historical context & metadata
+      const enrichedProduct = {
+        ...product,
+        ...(historyStats || {}),
+      };
+
+      // 3. Calculate smart deal score
+      const dealScore = calculateDealScore(enrichedProduct);
+      const verified  = isVerified(enrichedProduct, dealScore);
+      
+      enrichedProduct.dealScore      = dealScore;
+      enrichedProduct.isVerifiedDeal = verified;
+
+      logger.info(`[SmartDeal] asin=${product.asin} score=${dealScore} verified=${verified} avg30d=${enrichedProduct.avg30dPrice || '?'}`);
+
       // ── FORCE_FIRST_DEAL bypass (set env var for testing only) ───────────────
       if (process.env.FORCE_FIRST_DEAL === 'true' && !_forceSentFirstDeal && product.title && product.price) {
         _forceSentFirstDeal = true;

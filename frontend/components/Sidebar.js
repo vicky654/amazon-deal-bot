@@ -1,11 +1,13 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Plus, Package, Activity, MessageSquare,
   Wallet, Info, BarChart2, ListChecks,
   Cpu, MousePointerClick, LayoutDashboard, Bug, SlidersHorizontal,
+  BadgePercent, TrendingDown, Sparkles, Tags, ShoppingCart, ChevronDown, ChevronRight, Award, Zap
 } from 'lucide-react';
 
 const MENU = [
@@ -13,6 +15,28 @@ const MENU = [
     section: 'Overview',
     items: [
       { label: 'Dashboard',         href: '/admin',          icon: LayoutDashboard },
+    ],
+  },
+  {
+    section: 'Smart Deals',
+    items: [
+      { 
+        label: 'Explore Deals', 
+        href: '/admin/smart-deals', 
+        icon: Sparkles,
+        subItems: [
+          { label: '🔥 Trending',      href: '/admin/smart-deals/trending', icon: Award },
+          { label: '📉 Lowest Price',  href: '/admin/smart-deals/lowest-price', icon: TrendingDown },
+          { label: '⚡ Lightning',    href: '/admin/smart-deals/lightning', icon: Zap },
+          { label: '👟 Shoes',         href: '/admin/smart-deals/shoes' },
+          { label: '👕 Fashion',       href: '/admin/smart-deals/fashion' },
+          { label: '📱 Electronics',   href: '/admin/smart-deals/electronics' },
+          { label: '⌚ Watches',       href: '/admin/smart-deals/watches' },
+          { label: '💄 Beauty',        href: '/admin/smart-deals/beauty' },
+          { label: '🏠 Home & Kitchen',href: '/admin/smart-deals/home-kitchen' },
+          { label: '🎮 Gaming',        href: '/admin/smart-deals/gaming' },
+        ]
+      },
     ],
   },
   {
@@ -52,11 +76,16 @@ const BADGE_COLORS = {
 
 export default function Sidebar({ open = false, onClose = () => {} }) {
   const pathname = usePathname();
+  const [expanded, setExpanded] = React.useState({ 'Explore Deals': true });
 
   function isActive(href) {
     if (href === '/admin') return pathname === '/admin';
     return pathname === href || pathname?.startsWith(`${href}/`);
   }
+
+  const toggleExpand = (label) => {
+    setExpanded(prev => ({ ...prev, [label]: !prev[label] }));
+  };
 
   return (
     <>
@@ -115,37 +144,80 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
                 {group.items.map((item) => {
                   const active = isActive(item.href);
                   const Icon   = item.icon;
+                  const hasSub = item.subItems && item.subItems.length > 0;
+                  const isExpanded = expanded[item.label];
+
                   return (
-                    <Link
-                      key={item.label}
-                      href={item.href}
-                      onClick={onClose}
-                      className={[
-                        'group flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all touch-manipulation',
-                        active
-                          ? 'text-white'
-                          : 'text-slate-400 hover:text-white',
-                      ].join(' ')}
-                      style={active ? {
-                        background: 'linear-gradient(135deg, rgba(249,115,22,0.18), rgba(234,88,12,0.10))',
-                        border: '1px solid rgba(249,115,22,0.25)',
-                      } : {
-                        border: '1px solid transparent',
-                      }}
-                    >
-                      <Icon
-                        className={`w-4 h-4 shrink-0 transition-colors ${
-                          active ? 'text-orange-400' : 'text-slate-600 group-hover:text-slate-400'
-                        }`}
-                        strokeWidth={active ? 2.5 : 1.75}
-                      />
-                      <span className="flex-1 truncate">{item.label}</span>
-                      {item.badge && (
-                        <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${BADGE_COLORS[item.badge] ?? ''}`}>
-                          {item.badge}
-                        </span>
+                    <div key={item.label}>
+                      {hasSub ? (
+                        <button
+                          onClick={() => toggleExpand(item.label)}
+                          className={[
+                            'w-full group flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all touch-manipulation',
+                            active || isExpanded ? 'text-white' : 'text-slate-400 hover:text-white',
+                          ].join(' ')}
+                        >
+                          <Icon
+                            className={`w-4 h-4 shrink-0 transition-colors ${
+                              active || isExpanded ? 'text-orange-400' : 'text-slate-600 group-hover:text-slate-400'
+                            }`}
+                          />
+                          <span className="flex-1 text-left truncate">{item.label}</span>
+                          {isExpanded ? <ChevronDown size={14} className="text-slate-600" /> : <ChevronRight size={14} className="text-slate-600" />}
+                        </button>
+                      ) : (
+                        <Link
+                          href={item.href}
+                          onClick={onClose}
+                          className={[
+                            'group flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all touch-manipulation',
+                            active ? 'text-white' : 'text-slate-400 hover:text-white',
+                          ].join(' ')}
+                          style={active ? {
+                            background: 'linear-gradient(135deg, rgba(249,115,22,0.18), rgba(234,88,12,0.10))',
+                            border: '1px solid rgba(249,115,22,0.25)',
+                          } : {
+                            border: '1px solid transparent',
+                          }}
+                        >
+                          <Icon
+                            className={`w-4 h-4 shrink-0 transition-colors ${
+                              active ? 'text-orange-400' : 'text-slate-600 group-hover:text-slate-400'
+                            }`}
+                            strokeWidth={active ? 2.5 : 1.75}
+                          />
+                          <span className="flex-1 truncate">{item.label}</span>
+                          {item.badge && (
+                            <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${BADGE_COLORS[item.badge] ?? ''}`}>
+                              {item.badge}
+                            </span>
+                          )}
+                        </Link>
                       )}
-                    </Link>
+
+                      {/* Sub Items */}
+                      {hasSub && isExpanded && (
+                        <div className="mt-1 ml-4 pl-3 border-l border-slate-800 space-y-1">
+                          {item.subItems.map(sub => {
+                            const subActive = isActive(sub.href);
+                            const SubIcon = sub.icon;
+                            return (
+                              <Link
+                                key={sub.label}
+                                href={sub.href}
+                                onClick={onClose}
+                                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] font-medium transition-colors ${
+                                  subActive ? 'text-orange-400 bg-orange-500/5' : 'text-slate-500 hover:text-slate-300'
+                                }`}
+                              >
+                                {SubIcon && <SubIcon size={12} />}
+                                {sub.label}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>

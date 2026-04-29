@@ -29,23 +29,39 @@ const dealSchema = new mongoose.Schema(
       index: true,
     },
     title:         { type: String, required: true, trim: true },
+    brand:         { type: String, trim: true },
     price:         { type: Number },
     originalPrice: { type: Number },
     discount:      { type: Number },  // percentage
-    savings:       { type: Number },  // rupees saved (optional)
+    savings:       { type: Number },  // rupees saved
     image:         { type: String },
-    link:          { type: String },  // canonical product URL (legacy — prefer originalLink)
-    originalLink:  { type: String },  // scraped product URL (always the raw platform URL)
-    affiliateLink: { type: String },  // affiliate URL (tag / EarnKaro); null if generation failed
-    finalLink:     { type: String },  // affiliateLink if available, else originalLink
-    category:      { type: String, default: 'general' },
+    link:          { type: String },  
+    originalLink:  { type: String },
+    affiliateLink: { type: String },
+    finalLink:     { type: String },
+    category:      { type: String, default: 'general', index: true },
+    
+    // ── Smart Deal Metadata ──────────────────────────────────────────────────
+    rating:        { type: Number },
+    reviewCount:   { type: Number },
+    lowestPrice:   { type: Number },
+    highestPrice:  { type: Number },
+    avg7dPrice:    { type: Number },
+    avg30dPrice:   { type: Number },
+    dealScore:     { type: Number, default: 0, index: true },
+    isVerifiedDeal: { type: Boolean, default: false, index: true },
+    isLightningDeal: { type: Boolean, default: false },
+    badgeInfo:     { type: String },
+    couponInfo:    { type: String },
+    volatility:    { type: Number }, // price change frequency
+
     dealType: {
       type:    String,
       enum:    ['discount', 'price-drop', 'manual'],
       default: 'discount',
     },
     filterReason: { type: String },
-    score:        { type: Number, default: 0 },   // 0-100 deal score
+    score:        { type: Number, default: 0 },   // legacy score field
 
     // ── Pipeline step tracking ──────────────────────────────────────────────
     steps: {

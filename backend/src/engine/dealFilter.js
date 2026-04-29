@@ -97,7 +97,10 @@ async function evaluateDeal(product) {
  * - Never resets `posted` flag (prevents Telegram re-posts)
  */
 async function upsertDeal(product, category, dealType, reason) {
-  const { platform, asin, title, price, originalPrice, discount, image, affiliateLink, url, originalLink, finalLink } = product;
+  const { 
+    platform, asin, title, price, originalPrice, discount, image, affiliateLink, url, originalLink, finalLink,
+    rating, reviewCount, brand, isLightningDeal, couponInfo, badgeInfo, dealScore, isVerifiedDeal
+  } = product;
 
   const priceEntry = {
     price,
@@ -122,13 +125,15 @@ async function upsertDeal(product, category, dealType, reason) {
     existing.dealType      = dealType      || existing.dealType;
     existing.filterReason  = reason;
 
-    // Always recalculate score so a better discount on re-scrape is reflected.
-    // Without this, a deal first seen at 35% off keeps a low score forever,
-    // and the MIN_DEAL_SCORE gate silently blocks it even when it's now 60% off.
-    existing.score = scoreDeal(
-      { platform: existing.platform, price, originalPrice: originalPrice || existing.originalPrice, discount: discount || existing.discount },
-      dealType || existing.dealType,
-    );
+    // Smart Metadata
+    existing.rating          = rating          || existing.rating;
+    existing.reviewCount      = reviewCount      || existing.reviewCount;
+    existing.brand           = brand           || existing.brand;
+    existing.isLightningDeal = isLightningDeal !== undefined ? isLightningDeal : existing.isLightningDeal;
+    existing.couponInfo      = couponInfo      || existing.couponInfo;
+    existing.badgeInfo       = badgeInfo       || existing.badgeInfo;
+    existing.dealScore       = dealScore       !== undefined ? dealScore : existing.dealScore;
+    existing.isVerifiedDeal  = isVerifiedDeal  !== undefined ? isVerifiedDeal : existing.isVerifiedDeal;
 
     existing.priceHistory.push(priceEntry);
     if (existing.priceHistory.length > 50) existing.priceHistory.shift();
@@ -138,16 +143,22 @@ async function upsertDeal(product, category, dealType, reason) {
     return saved;
   }
 
-  const score = scoreDeal({ platform, price, originalPrice, discount }, dealType);
-
   const created = await Deal.create({
     platform,
     asin:          asin || `${platform}_${Date.now()}`,
     title,
+    brand,
     price,
     originalPrice: originalPrice || null,
     discount:      discount || null,
     image:         image || null,
+    rating,
+    reviewCount,
+    isLightningDeal,
+    couponInfo,
+    badgeInfo,
+    dealScore:     dealScore || 0,
+    isVerifiedDeal: isVerifiedDeal || false,
     affiliateLink: affiliateLink || null,
     originalLink:  originalLink || url,
     finalLink:     finalLink    || affiliateLink || url,
@@ -155,7 +166,7 @@ async function upsertDeal(product, category, dealType, reason) {
     category:      category || platform,
     dealType:      dealType || 'discount',
     filterReason:  reason,
-    score,
+    score:         dealScore || 0, // sync legacy field
     posted:        false,
     priceHistory:  [priceEntry],
     steps: {

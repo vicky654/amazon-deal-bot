@@ -73,6 +73,46 @@ const IMAGE_SELECTORS = [
   '.a-dynamic-image',
 ];
 
+const RATING_SELECTORS = [
+  'span.a-icon-alt',
+  '#acrPopover',
+  '.a-star-4-5',
+  '.a-star-4',
+  '.a-star-5',
+];
+
+const REVIEWS_SELECTORS = [
+  '#acrCustomerReviewText',
+  '#averageCustomerReviews span.a-size-base',
+];
+
+const BRAND_SELECTORS = [
+  '#bylineInfo',
+  'a#bylineInfo',
+  '#brand',
+  '.po-brand span.a-size-base',
+];
+
+const LIGHTNING_DEAL_SELECTORS = [
+  '#lightning-deal-unit',
+  '#dealBadge_feature_div',
+  '.badge-deal-type-lightning',
+];
+
+const COUPON_SELECTORS = [
+  '#applicable_labels_feature_div',
+  'label[id^="couponText"]',
+  'span[id^="couponText"]',
+  '.vcp-coupon-text',
+];
+
+const BADGE_SELECTORS = [
+  '#dealBadge_feature_div span',
+  '#price-shipping-message .a-color-secondary',
+  '.a-badge-text',
+  '.best-seller-badge',
+];
+
 // ── Layer 3: Non-amazon domains that indicate a redirect away from product ────
 const REDIRECT_DOMAINS = [
   'primevideo.com',
@@ -126,7 +166,7 @@ async function saveDebugSnapshot(page, label) {
 
 // ── Page evaluator (serialised into browser — no closures allowed) ────────────
 
-function amazonEvaluator(titleSels, priceSels, origSels, imgSels) {
+function amazonEvaluator(titleSels, priceSels, origSels, imgSels, ratingSels, reviewSels, brandSels, ldSels, couponSels, badgeSels) {
   function qText(sels) {
     for (const s of sels) {
       const el = document.querySelector(s);
@@ -137,33 +177,22 @@ function amazonEvaluator(titleSels, priceSels, origSels, imgSels) {
     }
     return null;
   }
-  function qAttr(sels, attr) {
-    for (const s of sels) {
-      const el = document.querySelector(s);
-      if (el && el[attr]) return el[attr];
-    }
-    return null;
-  }
+  
   function parseNum(t) {
     if (!t) return null;
     const n = parseFloat(t.replace(/[^0-9.]/g, ''));
     return isNaN(n) ? null : n;
   }
 
-  // ── Image: try data-a-dynamic-image (high-res JSON map) before falling back to src ──
-  // Amazon stores high-res URLs in data-a-dynamic-image even when the src is a placeholder.
   function getImage(sels) {
     for (const s of sels) {
       const el = document.querySelector(s);
       if (!el) continue;
-
-      // data-a-dynamic-image = '{"https://...jpg":[1500,1500],"https://...jpg":[75,75]}'
       const dynamicRaw = el.getAttribute('data-a-dynamic-image');
       if (dynamicRaw) {
         try {
           const urlMap = JSON.parse(dynamicRaw);
           const urls   = Object.keys(urlMap);
-          // Prefer the largest image (sort by pixel area descending)
           urls.sort((a, b) => {
             const [wa, ha] = urlMap[a] || [0, 0];
             const [wb, hb] = urlMap[b] || [0, 0];
@@ -172,10 +201,7 @@ function amazonEvaluator(titleSels, priceSels, origSels, imgSels) {
           if (urls.length > 0 && urls[0].startsWith('https://')) return urls[0];
         } catch (_) {}
       }
-
-      // Fall back to src attribute
       const src = el.getAttribute('src') || el.src || '';
-      // Skip tiny placeholder: Amazon 1px placeholder is "transparent-pixel.gif" or data: URI
       if (src && src.startsWith('https://') && !src.includes('transparent-pixel') && !src.startsWith('data:')) {
         return src;
       }
@@ -187,11 +213,24 @@ function amazonEvaluator(titleSels, priceSels, origSels, imgSels) {
   const price         = parseNum(qText(priceSels));
   const originalPrice = parseNum(qText(origSels));
   const image         = getImage(imgSels);
+  
+  // Rating: "4.5 out of 5 stars" -> 4.5
+  const ratingText    = qText(ratingSels);
+  const rating        = ratingText ? parseFloat(ratingText.split(' ')[0]) : null;
+  
+  // Reviews: "12,992 ratings" -> 12992
+  const reviewsText   = qText(reviewSels);
+  const reviewCount   = reviewsText ? parseInt(reviewsText.replace(/[^0-9]/g, '')) : null;
+  
+  const brand         = (qText(brandSels) || '').replace(/^Visit the | Store$/gi, '');
+  const isLightningDeal = !!document.querySelector(ldSels.join(', '));
+  const couponInfo    = qText(couponSels);
+  const badgeInfo     = qText(badgeSels);
+  
   const discount      = (price && originalPrice && originalPrice > price)
     ? Math.round(((originalPrice - price) / originalPrice) * 100)
     : null;
 
-  // DOM-rendered unavailability — catches JS-injected add-on badges and OOS states
   const isUnavailable = !!(
     document.getElementById('outOfStock') ||
     document.querySelector('[data-feature-name="addonBadge"]') ||
@@ -201,7 +240,11 @@ function amazonEvaluator(titleSels, priceSels, origSels, imgSels) {
       .some((el) => /unavailable|out of stock/i.test(el.innerText || ''))
   );
 
-  return { title, price, originalPrice, discount, image, url: window.location.href, isUnavailable };
+  return { 
+    title, price, originalPrice, discount, image, 
+    rating, reviewCount, brand, isLightningDeal, couponInfo, badgeInfo,
+    url: window.location.href, isUnavailable 
+  };
 }
 
 // ── Scraper ───────────────────────────────────────────────────────────────────
@@ -319,6 +362,12 @@ async function scrapeAmazon(url, attempt = 1) {
       PRICE_SELECTORS,
       ORIGINAL_PRICE_SELECTORS,
       IMAGE_SELECTORS,
+      RATING_SELECTORS,
+      REVIEWS_SELECTORS,
+      BRAND_SELECTORS,
+      LIGHTNING_DEAL_SELECTORS,
+      COUPON_SELECTORS,
+      BADGE_SELECTORS,
     );
 
     // DOM-rendered unavailability (DISABLED FOR TESTING)
