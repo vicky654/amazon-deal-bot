@@ -33,8 +33,8 @@ puppeteer.use(StealthPlugin());
 
 const CHROME_PROFILE_DIR = path.join(__dirname, '..', '..', 'chrome-profile');
 
-// Default to visible Chrome (HEADLESS=false). Set HEADLESS=true to override.
-const IS_HEADLESS = process.env.HEADLESS === 'true';
+// Default to headless Chrome. Visible mode disabled to prevent resource exhaustion.
+const IS_HEADLESS = true; 
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.85 Safari/537.36',
@@ -51,47 +51,10 @@ const HUMAN_VIEWPORTS = [
 ];
 
 const LAUNCH_ARGS = [
-  // ── Sandbox ────────────────────────────────────────────────────────────────
   '--no-sandbox',
   '--disable-setuid-sandbox',
   '--disable-dev-shm-usage',
-
-  // ── SSL / cert bypass — fixes net::ERR_CERT_AUTHORITY_INVALID ────────────
-  '--ignore-certificate-errors',
-  '--ignore-certificate-errors-spki-list',
-  '--allow-running-insecure-content',
-  '--disable-web-security',
-
-  // ── GPU / stability ────────────────────────────────────────────────────────
-  '--disable-gpu',
-  '--disable-software-rasterizer',
-
-  // ── First-run / defaults — prevents Chrome from blocking on first-launch UI ─
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--disable-default-apps',
-
-  // ── Crash / hang guards ────────────────────────────────────────────────────
-  '--disable-hang-monitor',
-  '--disable-prompt-on-repost',
-  '--disable-domain-reliability',
-  '--disable-breakpad',
-  '--disable-features=site-per-process,TranslateUI,BlinkGenPropertyTrees',
-
-  // ── Background throttling off — keeps timers accurate ─────────────────────
-  '--disable-background-networking',
-  '--disable-background-timer-throttling',
-  '--disable-renderer-backgrounding',
-  '--disable-backgrounding-occluded-windows',
-  '--disable-ipc-flooding-protection',
-
-  // ── Automation detection ───────────────────────────────────────────────────
-  '--disable-blink-features=AutomationControlled',
-
-  // ── Locale / language — Amazon India serves INR prices for en-IN ──────────
   '--lang=en-IN',
-
-  // ── Viewport ───────────────────────────────────────────────────────────────
   '--window-size=1366,768',
 ];
 
@@ -175,11 +138,6 @@ const STEALTH_SCRIPT = `
 `;
 
 // ── Browser lifecycle limits ──────────────────────────────────────────────────
-// Conservative defaults: restart only when truly necessary.
-// With CRON_SCHEDULE=*/5, a typical cycle opens ~30 pages.
-// 300 pages ≈ 9–10 cycles before a page-limit restart (45–50 min at 5-min cron).
-// 240 min age limit prevents a single session running indefinitely.
-// Both can be overridden via env vars without code changes.
 const MAX_PAGES_BEFORE_RESTART = parseInt(process.env.BROWSER_MAX_PAGES   || '300', 10);
 const MAX_BROWSER_AGE_MIN      = parseInt(process.env.BROWSER_MAX_AGE_MIN || '240', 10);
 const MAX_BROWSER_AGE_MS       = MAX_BROWSER_AGE_MIN * 60 * 1000;
@@ -211,8 +169,6 @@ function _countChromeProcesses() {
 
 /**
  * Poll until all chrome.exe processes are gone or timeout elapses.
- * Replaces the unreliable fixed sleep(2000) — taskkill returns before Windows
- * releases file handles, so a fixed delay causes intermittent profile locks.
  */
 async function waitForChromeToDie(maxWaitMs = 8000) {
   if (process.platform !== 'win32') return true;
@@ -235,7 +191,6 @@ async function waitForChromeToDie(maxWaitMs = 8000) {
 
 /**
  * Check Local State and Default/Preferences JSON files for corruption.
- * Resets any corrupt file to {} so Chrome can rebuild it on next launch.
  */
 function validateAndRepairProfile(profileDir) {
   const files = [
@@ -261,7 +216,6 @@ function validateAndRepairProfile(profileDir) {
 
 /**
  * Log Node.js memory + chrome.exe count immediately before a launch attempt.
- * Helps identify resource exhaustion as a launch failure cause.
  */
 async function logResourcesBeforeLaunch() {
   const mem = process.memoryUsage();
@@ -275,8 +229,6 @@ async function logResourcesBeforeLaunch() {
 
 /**
  * Delete Chrome's singleton lock files left behind by crashed sessions.
- * These files prevent a second Chrome from using the same profile dir.
- * Safe to delete — Chrome recreates them on each successful launch.
  */
 function clearChromeLocks(profileDir) {
   const LOCKS = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
@@ -299,38 +251,32 @@ function clearChromeLocks(profileDir) {
 
 /**
  * On Windows: kill orphaned chrome.exe processes that hold our profile lock.
- * Only runs when singleton lock files from CHROME_PROFILE_DIR are present —
- * meaning a previous Chrome using this profile crashed and left a stale process.
- * Skips the kill if no lock files exist, so a user's own Chrome is never touched.
  */
 function killLingeringChrome() {
   if (process.platform !== 'win32') return Promise.resolve(0);
-
-  // Only kill if our profile has orphaned lock files
+ 
+  // Only kill if our profile has orphaned lock files — indicates a previous crash
   const hasLock = ['SingletonLock', 'SingletonCookie', 'SingletonSocket']
     .some(name => fs.existsSync(path.join(CHROME_PROFILE_DIR, name)));
-
+ 
   if (!hasLock) {
-    logger.debug('[Browser] No Chrome lock files found — skipping kill (no orphan detected)');
+    logger.debug('[Browser] No Puppeteer lock files found — skipping kill');
     return Promise.resolve(0);
   }
-
+ 
   return new Promise((resolve) => {
-    exec('tasklist /FI "IMAGENAME eq chrome.exe" /FO CSV /NH 2>NUL', (err, stdout) => {
-      if (err || !stdout || !stdout.toLowerCase().includes('chrome.exe')) {
-        resolve(0);
-        return;
+    console.log('[Browser] cleaning orphan chrome processes');
+    // Escape backslashes for PowerShell
+    const escapedProfile = CHROME_PROFILE_DIR.replace(/\\/g, '\\\\');
+    const psCommand = `Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe' AND CommandLine LIKE '%${escapedProfile}%'" | Stop-Process -Force`;
+    
+    exec(`powershell -Command "${psCommand}"`, (killErr) => {
+      if (killErr) {
+        logger.debug(`[Browser] orphan cleanup status: ${killErr.message}`);
+      } else {
+        logger.info('[Browser] Targeted orphan chrome processes terminated');
       }
-      const count = (stdout.match(/chrome\.exe/gi) || []).length;
-      logger.warn(`[Browser] Lock files found + ${count} chrome.exe running — terminating orphan(s)`);
-      exec('taskkill /F /IM chrome.exe /T 2>NUL', (killErr) => {
-        if (killErr) {
-          logger.warn(`[Browser] taskkill partial failure (may need admin rights): ${killErr.message}`);
-        } else {
-          logger.info('[Browser] Orphan chrome.exe processes terminated');
-        }
-        resolve(count);
-      });
+      resolve(1);
     });
   });
 }
@@ -358,7 +304,6 @@ function quarantineProfile(profileDir) {
 
 /**
  * Log a detailed, actionable launch failure report.
- * Puppeteer swallows Chromium stderr into the error object — surface everything.
  */
 function logLaunchFailure(err, profileDir, attempt) {
   const msg   = (err && (err.message || err.toString())) || '(no message — Chromium likely crashed silently)';
@@ -367,21 +312,10 @@ function logLaunchFailure(err, profileDir, attempt) {
   logger.error(`[Browser] LAUNCH FAILED (attempt ${attempt})`);
   logger.error(`[Browser]   Error   : ${msg}${stack}`);
   logger.error(`[Browser]   Profile : ${profileDir}`);
-  logger.error(`[Browser]   Headless: ${IS_HEADLESS}`);
-  logger.error(`[Browser]   Args    : ${LAUNCH_ARGS.join(' ')}`);
-  logger.error(`[Browser] Diagnosis:`);
-  if (!msg || msg.includes('undefined') || msg.includes('spawn')) {
-    logger.error(`[Browser]   → Most likely: SingletonLock file OR chrome.exe already running`);
-    logger.error(`[Browser]   → Try: HEADLESS=false node server.js  to see Chrome error dialog`);
-    logger.error(`[Browser]   → Check: ls backend/chrome-profile/Singleton*`);
-  }
-  if (msg.includes('ENOENT') || msg.includes('not found') || msg.includes('executablePath')) {
-    logger.error(`[Browser]   → Chromium binary missing — run: node -e "require('puppeteer').executablePath()"`);
-  }
   logger.error(`[Browser] ════════════════════════════════════════════════`);
 }
 
-// ── Core launch (with 2-attempt recovery) ────────────────────────────────────
+// ── Core launch ────────────────────────────────────────────────────────────
 
 async function _doLaunch(profileDir, headlessMode) {
   const executablePath = puppeteerVanilla.executablePath();
@@ -405,9 +339,6 @@ async function _doLaunch(profileDir, headlessMode) {
 // ── Browser lifecycle ─────────────────────────────────────────────────────────
 
 async function getBrowser() {
-  // Wait for any in-progress close to settle before we attempt a launch.
-  // Without this guard, openPage() calling getBrowser() mid-close can race
-  // with a simultaneous lifecycle restart and produce two concurrent launches.
   if (_closePromise) {
     logger.debug('[Browser] Waiting for in-progress close before launching…');
     await _closePromise;
@@ -423,54 +354,38 @@ async function getBrowser() {
 }
 
 async function _safeLaunch() {
-  // ── Pre-launch: resource snapshot, kill lingering processes, clean locks ───
   await logResourcesBeforeLaunch();
   await killLingeringChrome();
   await waitForChromeToDie(8000);   // poll until ALL chrome.exe truly gone
   clearChromeLocks(CHROME_PROFILE_DIR);
   validateAndRepairProfile(CHROME_PROFILE_DIR);
 
-  const headlessNew = IS_HEADLESS ? 'new' : false;
-  const headlessFallback = IS_HEADLESS ? true : false;   // old headless, more stable on Windows
-
-  // ── Attempt 1: existing profile, headless='new' ────────────────────────────
+  const headlessFallback = true;
+ 
+  // ── SINGLETON ATTEMPT: Legacy headless (headless=true) ─────────────────────
+  // Legacy mode is significantly more stable for long-running crawlers on Windows.
   try {
-    return _onLaunchSuccess(await _doLaunch(CHROME_PROFILE_DIR, headlessNew));
-  } catch (err1) {
-    logLaunchFailure(err1, CHROME_PROFILE_DIR, 1);
-    logger.warn('[Browser] Attempt 1 failed — polling for Chrome exit…');
+    console.log('[Browser] existing browser reused');
+    const chromeCount = await _countChromeProcesses();
+    console.log(`[Browser] chrome.exe count: ${chromeCount}`);
+    return _onLaunchSuccess(await _doLaunch(CHROME_PROFILE_DIR, headlessFallback));
+  } catch (err) {
+    logLaunchFailure(err, CHROME_PROFILE_DIR, 1);
+    logger.warn('[Browser] Launch failed — retrying with fresh profile…');
   }
 
   await waitForChromeToDie(8000);
   clearChromeLocks(CHROME_PROFILE_DIR);
-
-  // ── Attempt 2: same profile, headless=true (legacy — more stable on Windows) ─
-  //    headless='new' has known instability with persistent profiles on Windows;
-  //    legacy mode avoids the new headless architecture entirely.
-  try {
-    logger.warn(`[Browser] Attempt 2: retrying with headless=${headlessFallback} (legacy mode)…`);
-    return _onLaunchSuccess(await _doLaunch(CHROME_PROFILE_DIR, headlessFallback));
-  } catch (err2) {
-    logLaunchFailure(err2, CHROME_PROFILE_DIR, 2);
-    logger.error('[Browser] Attempt 2 (legacy headless) failed — quarantining profile');
-  }
-
-  // ── Attempt 3: quarantine corrupt profile, launch with clean slate ─────────
   quarantineProfile(CHROME_PROFILE_DIR);
-  clearChromeLocks(CHROME_PROFILE_DIR);
-  await waitForChromeToDie(5000);
 
   try {
-    logger.warn('[Browser] Attempt 3: fresh profile…');
+    logger.warn('[Browser] Attempt 2: fresh profile…');
     const browser = await _doLaunch(CHROME_PROFILE_DIR, headlessFallback);
-    logger.warn('[Browser] Attempt 3 succeeded on FRESH profile (cookies/history lost)');
     return _onLaunchSuccess(browser);
-  } catch (err3) {
+  } catch (err) {
     _launchPromise = null;
     _browser       = null;
-    logLaunchFailure(err3, CHROME_PROFILE_DIR, 3);
-    logger.error('[Browser] ALL 3 LAUNCH ATTEMPTS FAILED. Check Chromium binary and system resources.');
-    throw err3;
+    throw err;
   }
 }
 
@@ -481,7 +396,7 @@ function _onLaunchSuccess(browser) {
   _browserStart  = Date.now();
 
   browser.on('disconnected', () => {
-    logger.warn('[Browser] ⚠ Chromium disconnected unexpectedly (crash or OS kill) — will cold-start on next crawl request');
+    logger.warn('[Browser] ⚠ Chromium disconnected unexpectedly');
     _browser      = null;
     _warmUpDone   = false;
     _pageCount    = 0;
@@ -498,26 +413,6 @@ async function closeBrowser(reason = 'explicit close') {
   if (_isClosing || !_browser) return;
   _isClosing = true;
 
-  // Capture diagnostics at close time
-  const ageMs   = _browserStart ? Date.now() - _browserStart : 0;
-  const mem     = process.memoryUsage();
-  const stack   = new Error().stack || '';
-  // Pull the first line outside this function itself (index 2 = direct caller)
-  const callerLines = stack.split('\n').slice(2, 5)
-    .map(l => l.trim().replace(/^\s*at\s+/, ''))
-    .join(' → ');
-
-  logger.info(`[Browser] ╔══ BROWSER CLOSE TRIGGERED ══╗`);
-  logger.info(`[Browser] ║ Reason     : ${reason}`);
-  logger.info(`[Browser] ║ Caller     : ${callerLines}`);
-  logger.info(`[Browser] ║ Page count : ${_pageCount} / ${MAX_PAGES_BEFORE_RESTART}`);
-  logger.info(`[Browser] ║ Age        : ${Math.round(ageMs / 60000)} min / ${MAX_BROWSER_AGE_MIN} min limit`);
-  logger.info(`[Browser] ║ Node RSS   : ${Math.round(mem.rss / 1024 / 1024)} MB`);
-  logger.info(`[Browser] ║ Node heap  : ${Math.round(mem.heapUsed / 1024 / 1024)} / ${Math.round(mem.heapTotal / 1024 / 1024)} MB`);
-  logger.info(`[Browser] ╚═════════════════════════════╝`);
-
-  // Clear state synchronously so concurrent getBrowser()/openPage() callers
-  // see a null browser immediately — they will await _closePromise before relaunching.
   const browserRef  = _browser;
   _browser          = null;
   _warmUpDone       = false;
@@ -525,7 +420,7 @@ async function closeBrowser(reason = 'explicit close') {
   _browserStart     = 0;
 
   _closePromise = browserRef.close()
-    .catch((e) => logger.warn(`[Browser] close() error (non-fatal): ${e.message}`))
+    .catch((e) => logger.warn(`[Browser] close() error: ${e.message}`))
     .then(() => { logger.info('[Browser] Closed OK'); })
     .finally(() => {
       _isClosing    = false;
@@ -535,7 +430,7 @@ async function closeBrowser(reason = 'explicit close') {
   return _closePromise;
 }
 
-// ── Warm-up — visits Amazon India homepage once per browser session ───────────
+// ── Warm-up ──────────────────────────────────────────────────────────────────
 async function warmUpBrowser() {
   if (_warmUpDone) return;
   _warmUpDone = true;
@@ -545,58 +440,34 @@ async function warmUpBrowser() {
   let page = null;
   try {
     page = await openPage({ blockAssets: false });
-
-    await page.goto('https://www.amazon.in/', {
-      waitUntil: 'domcontentloaded',
-      timeout:   30000,
-    });
-
-    const title = await page.title().catch(() => '');
-    logger.info(`[Browser] Warm-up page loaded — "${title}"`);
-
+    await page.goto('https://www.amazon.in/', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await sleep(2000 + rand(1500));
-    await page.mouse.move(300 + rand(400), 200 + rand(300), { steps: 8 });
-    await sleep(500 + rand(500));
-    await page.mouse.move(600 + rand(300), 400 + rand(200), { steps: 6 });
-    await sleep(1000 + rand(800));
-
-    logger.info('[Browser] Warm-up complete — Amazon session cookies acquired');
   } catch (err) {
-    logger.warn(`[Browser] Warm-up failed (non-fatal): ${err.message}`);
+    logger.warn(`[Browser] Warm-up failed: ${err.message}`);
   } finally {
     if (page) await page.close().catch(() => {});
   }
 }
 
 // ── Open page ─────────────────────────────────────────────────────────────────
-/**
- * blockAssets modes:
- *   false / 'none'  — allow everything (most natural, use for category pages)
- *   'media'         — block only font + video/audio (safe, keeps images + CSS)
- *   'heavy'         — block image + font + media + stylesheet (fastest, product pages)
- */
 async function openPage({ blockAssets = false, ua = null } = {}) {
-  // ── Lifecycle limit check (informational only — restarts are handled by checkLifecycle()) ──
-  // Restarts used to happen here, mid-scrape, which wiped session trust after every
-  // 50 pages (~7 min at 5-min cron). Now the crawler calls checkLifecycle() BEFORE
-  // warmup at the START of each cycle, so restarts are clean and between cycles only.
-  if (_browser && _browser.isConnected() && !_isClosing) {
-    const ageMs        = _browserStart ? Date.now() - _browserStart : 0;
-    const ageLimitHit  = ageMs >= MAX_BROWSER_AGE_MS;
-    const pageLimitHit = _pageCount >= MAX_PAGES_BEFORE_RESTART;
-    if (ageLimitHit || pageLimitHit) {
-      logger.warn(
-        `[Browser] ⚠ Lifecycle limit exceeded (pages=${_pageCount}/${MAX_PAGES_BEFORE_RESTART} ` +
-        `age=${Math.round(ageMs / 60000)}/${MAX_BROWSER_AGE_MIN}min) — ` +
-        `restart will happen at start of NEXT cycle via checkLifecycle()`
-      );
-    }
-  }
-
   let browser = await getBrowser();
   let page;
-
+ 
   try {
+    const pages = await browser.pages();
+    console.log(`[Browser] open pages: ${pages.length}`);
+    
+    // Page limit and recycling
+    const PAGE_THRESHOLD = 5;
+    if (pages.length > PAGE_THRESHOLD) {
+      console.log('[Browser] recycling pages');
+      // Close all but the first (blank/background) page
+      for (let i = 1; i < pages.length; i++) {
+        await pages[i].close().catch(() => {});
+      }
+    }
+
     page = await browser.newPage();
   } catch (err) {
     logger.warn(`[Browser] newPage failed (${err.message}) — relaunching`);

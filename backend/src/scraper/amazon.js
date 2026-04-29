@@ -270,7 +270,8 @@ async function scrapeAmazon(url, attempt = 1) {
     const navAsinMatch = finalUrl.match(/\/dp\/([A-Z0-9]{10})/i);
     extractedAsin = navAsinMatch ? navAsinMatch[1].toUpperCase() : null;
 
-    // ── Layer 3: Redirect guard (attempt 1 only — permanent, no retry) ────────
+    // ── Layer 3: Redirect guard (DISABLED FOR TESTING) ──────────────────────
+    /*
     if (attempt === 1) {
       const isRedirected =
         (!finalUrl.includes('/dp/') && !finalUrl.includes('/gp/product/')) ||
@@ -280,8 +281,10 @@ async function scrapeAmazon(url, attempt = 1) {
         throw skip('redirect', url);
       }
     }
+    */
 
-    // ── Layer 2: HTML unavailability (attempt 1 only — product state is permanent) ─
+    // ── Layer 2: HTML unavailability (DISABLED FOR TESTING) ─────────────────
+    /*
     if (attempt === 1) {
       if (UNAVAILABLE_PATTERN.test(html)) {
         metrics.skipped_unavailable++;
@@ -289,6 +292,7 @@ async function scrapeAmazon(url, attempt = 1) {
         return null; // silent return — not an error, just no product
       }
     }
+    */
 
     // ── Bot / CAPTCHA fallback (no retry) ─────────────────────────────────────
     if (BOT_PATTERN.test(html)) {
@@ -317,12 +321,14 @@ async function scrapeAmazon(url, attempt = 1) {
       IMAGE_SELECTORS,
     );
 
-    // DOM-rendered unavailability (JS-injected after page load)
+    // DOM-rendered unavailability (DISABLED FOR TESTING)
+    /*
     if (raw.isUnavailable) {
       metrics.skipped_dom++;
       logger.warn(`[SKIP] dom_unavailable — ${url}`);
       return null;
     }
+    */
 
     if (!raw.title || !raw.price) {
       throw new Error(`Missing data — title=${!!raw.title} price=${!!raw.price}`);

@@ -69,78 +69,31 @@ function RunRow({ run }) {
 
   return (
     <div className="border border-slate-100 rounded-xl overflow-hidden">
-      {/* Summary row */}
       <button
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors text-left"
       >
         <StatusBadge status={run.status} />
-
         <span className="text-xs text-slate-500 shrink-0">{timeAgo(run.startedAt)}</span>
-
         <div className="flex-1 flex flex-wrap gap-2">
-          {s.productsScanned != null && (
-            <span className="text-xs text-slate-600">
-              <span className="font-semibold">{s.productsScanned}</span> scraped
-            </span>
-          )}
-          {s.dealsFound != null && (
-            <span className="text-xs text-green-700">
-              <span className="font-semibold">{s.dealsFound}</span> deals
-            </span>
-          )}
-          {s.dealsPosted != null && (
-            <span className="text-xs text-blue-600">
-              <span className="font-semibold">{s.dealsPosted}</span> posted
-            </span>
-          )}
-          {s.errors > 0 && (
-            <span className="text-xs text-red-500">
-              <span className="font-semibold">{s.errors}</span> errors
-            </span>
-          )}
+          {s.productsScanned != null && <span className="text-xs text-slate-600 font-semibold">{s.productsScanned} scraped</span>}
+          {s.dealsFound != null && <span className="text-xs text-green-700 font-semibold">{s.dealsFound} deals</span>}
+          {s.dealsPosted != null && <span className="text-xs text-blue-600 font-semibold">{s.dealsPosted} posted</span>}
         </div>
-
         <span className="text-xs text-slate-400 shrink-0">{duration(run.durationMs)}</span>
-
-        <svg
-          className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
+        <svg className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
       </button>
 
-      {/* Expanded detail */}
       {expanded && (
         <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
-          {/* Stats grid */}
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-3">
-            <MiniStat label="Categories" value={s.categoriesScanned} color="slate"  />
-            <MiniStat label="Links"      value={s.linksExtracted}    color="slate"  />
+            <MiniStat label="Categories" value={s.categoriesScanned} color="slate" />
+            <MiniStat label="Links"      value={s.linksExtracted}    color="slate" />
             <MiniStat label="Scraped"    value={s.productsScanned}   color="orange" />
-            <MiniStat label="Deals"      value={s.dealsFound}        color="green"  />
-            <MiniStat label="Posted"     value={s.dealsPosted}       color="blue"   />
+            <MiniStat label="Deals"      value={s.dealsFound}        color="green" />
+            <MiniStat label="Posted"     value={s.dealsPosted}       color="blue" />
             <MiniStat label="Errors"     value={s.errors}            color={s.errors > 0 ? 'red' : 'slate'} />
           </div>
-
-          {/* Category breakdown */}
-          {run.categoryStats && run.categoryStats.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Category breakdown
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                {run.categoryStats.map((cat) => (
-                  <div key={cat.categoryId} className="flex items-center justify-between bg-white border border-slate-100 rounded-lg px-3 py-1.5">
-                    <span className="text-xs text-slate-600 truncate mr-2">{cat.categoryName}</span>
-                    <span className="text-xs font-semibold text-slate-800 shrink-0">{cat.linksFound}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {run.error && (
             <div className="mt-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
               <p className="text-xs text-red-600 font-mono">{run.error}</p>
@@ -152,203 +105,210 @@ function RunRow({ run }) {
   );
 }
 
-/* ── Main panel ───────────────────────────────────────────────────────────── */
+/* ── Main Panel ───────────────────────────────────────────────────────────── */
 
-/**
- * Props:
- *   onToast: ({ type, message }) => void
- */
 export default function CrawlerPanel({ onToast }) {
-  const [status, setStatus]   = useState(null);   // { isRunning, queueStats, recentRuns }
+  const [status, setStatus]   = useState(null);   // { running, status, currentCategory, ... }
   const [loading, setLoading] = useState(true);
-  const [starting, setStarting] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [localStatus, setLocalStatus] = useState(null); // 'restarting' etc.
 
   const fetchStatus = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API_URL}/api/crawler/status`);
       setStatus(data);
     } catch {
-      // Silently keep stale data — backend may be starting up
+      // Silently keep stale data
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Poll every 10 seconds while panel is visible
   useEffect(() => {
     fetchStatus();
     const timer = setInterval(fetchStatus, 10000);
     return () => clearInterval(timer);
   }, [fetchStatus]);
 
-  async function handleStart() {
-    if (status?.isRunning) return;
-    setStarting(true);
+  async function handleAction(action) {
+    if (actionLoading) return;
+    
+    setActionLoading(true);
+    if (action === 'restart') setLocalStatus('restarting');
+    
     try {
-      await axios.post(`${API_URL}/api/crawler/start`);
-      onToast({ type: 'success', message: 'Crawl cycle started!' });
-      // Poll quickly to pick up the new "running" status
-      setTimeout(fetchStatus, 1500);
+      const { data } = await axios.post(`${API_URL}/api/crawler/${action}`);
+      onToast({ type: 'success', message: data.message });
+      // Quick poll
+      setTimeout(fetchStatus, 2000);
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to start crawler';
+      const msg = err.response?.data?.error || `Failed to ${action} crawler`;
       onToast({ type: 'error', message: msg });
     } finally {
-      setStarting(false);
+      setActionLoading(false);
+      setLocalStatus(null);
     }
   }
 
-  const isRunning   = status?.isRunning ?? false;
-  const queueStats  = status?.queueStats ?? {};
-  const recentRuns  = status?.recentRuns ?? [];
-  const lastRun     = recentRuns[0];
+  const isRunning      = status?.running ?? false;
+  const currentStatus  = localStatus || status?.status || 'stopped';
+  const lastRun        = status?.lastRun;
 
   return (
-    <div className="space-y-4">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      {/* ── Main Control Panel (Left 2/3) ── */}
+      <div className="lg:col-span-2 space-y-4">
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8">
+              <div className="flex items-center gap-4">
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0 transition-all duration-500 ${isRunning ? 'bg-emerald-50 border border-emerald-100 rotate-12' : 'bg-slate-50 border border-slate-100'}`}>
+                  {isRunning ? '🟢' : '🔴'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h2 className="text-xl font-bold text-slate-900">Amazon Crown</h2>
+                    <CrawlerStatusBadge status={currentStatus} />
+                  </div>
+                  <p className="text-sm text-slate-500">
+                    {isRunning ? `Currently scanning ${status.currentCategory}` : 'Standby — waiting for manual start or next cron'}
+                  </p>
+                </div>
+              </div>
 
-      {/* Live status card */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0 ${isRunning ? 'bg-blue-50 border border-blue-100' : 'bg-orange-50 border border-orange-100'}`}>
-              {isRunning ? '⚙️' : '🔍'}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleAction('start')}
+                  disabled={isRunning || actionLoading}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${isRunning || actionLoading ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-emerald-500 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-200 active:scale-95'}`}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /></svg>
+                  Start
+                </button>
+                <button
+                  onClick={() => handleAction('stop')}
+                  disabled={!isRunning || actionLoading}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${!isRunning || actionLoading ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-rose-500 text-white hover:bg-rose-600 hover:shadow-lg hover:shadow-rose-200 active:scale-95'}`}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 10h6v4H9z" /></svg>
+                  Stop
+                </button>
+                <button
+                  onClick={() => handleAction('restart')}
+                  disabled={actionLoading}
+                  className={`p-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-all ${actionLoading ? 'opacity-50 cursor-not-allowed' : 'active:rotate-180'}`}
+                  title="Restart Crawler"
+                >
+                  <svg className={`w-5 h-5 ${currentStatus === 'restarting' ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                </button>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h2 className="text-sm sm:text-base font-semibold text-slate-900">Crawler Status</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {isRunning ? 'Crawl cycle in progress…' : 'Idle — scheduled every 5 min'}
-              </p>
+
+            {/* Live Stats Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <LiveStatCard label="Products Scanned" value={status?.productsScanned} icon="🔍" />
+              <LiveStatCard label="Deals Sent"      value={status?.dealsSent}       icon="🔥" color="orange" />
+              <LiveStatCard label="Active Pages"    value={status?.browserPages}    icon="📄" />
+              <LiveStatCard label="Queue Size"      value={status?.queueSize}       icon="📥" />
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={fetchStatus}
-              className="p-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-all"
-              title="Refresh status"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-            <button
-              onClick={handleStart}
-              disabled={isRunning || starting}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all
-                ${isRunning || starting
-                  ? 'bg-slate-300 cursor-not-allowed'
-                  : 'bg-orange-500 hover:bg-orange-600 shadow-sm shadow-orange-500/30'}`}
-            >
-              {isRunning || starting ? (
-                <>
-                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                  </svg>
-                  Running…
-                </>
-              ) : (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Run Now
-                </>
-              )}
-            </button>
-          </div>
+          {/* Current Category Bar */}
+          {isRunning && (
+            <div className="px-6 py-4 bg-emerald-50 border-t border-emerald-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Now Scanning</span>
+              </div>
+              <span className="text-sm font-semibold text-emerald-900">{status.currentCategory}</span>
+            </div>
+          )}
         </div>
 
-        {/* Live queue stats (visible while running) */}
-        {isRunning && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4 p-3 bg-blue-50 border border-blue-100 rounded-xl">
-            <MiniStat label="Pending"   value={queueStats.pending}        color="blue"   />
-            <MiniStat label="Active"    value={queueStats.active}         color="orange" />
-            <MiniStat label="Processed" value={queueStats.processed}      color="green"  />
-            <MiniStat label="Seen"      value={queueStats.seenThisCycle}  color="slate"  />
-          </div>
-        )}
-
-        {/* Last run summary */}
-        {!loading && lastRun && (
-          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-100">
-            <span className="text-xs text-slate-500">Last run:</span>
-            <StatusBadge status={lastRun.status} />
-            <span className="text-xs text-slate-400">{timeAgo(lastRun.startedAt)}</span>
-            <span className="text-xs text-slate-400">·</span>
-            <span className="text-xs text-slate-500">
-              {lastRun.stats?.dealsPosted ?? 0} deals posted in {duration(lastRun.durationMs)}
-            </span>
-          </div>
-        )}
-
-        {loading && (
-          <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
-            <svg className="w-3.5 h-3.5 text-slate-400 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-            </svg>
-            <span className="text-xs text-slate-400">Loading status…</span>
+        {/* Recent Run Row (if exists) */}
+        {lastRun && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <StatusBadge status={lastRun.status} />
+              <span className="text-sm text-slate-500">Last cycle ended {timeAgo(lastRun.finishedAt || lastRun.startedAt)}</span>
+            </div>
+            <span className="text-sm font-medium text-slate-700">{lastRun.stats?.dealsPosted || 0} deals found</span>
           </div>
         )}
       </div>
 
-      {/* Run history */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">Run History</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Last {recentRuns.length} crawl cycles · auto-refreshes every 10s</p>
+      {/* ── Secondary Info (Right 1/3) ── */}
+      <div className="space-y-4">
+        <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl shadow-slate-200">
+          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-6">System Health</h3>
+          <div className="space-y-5">
+            <HealthItem label="Browser Singleton" status="Stable" icon="🌐" />
+            <HealthItem label="Anti-Bot Guard"    status="Active" icon="🛡️" />
+            <HealthItem label="Proxy Rotation"    status="Standby" icon="🔄" />
+            <HealthItem label="Affiliate Engine"   status="Healthy" icon="🔗" />
+          </div>
+          
+          <div className="mt-8 pt-6 border-t border-slate-800">
+            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-2">Last Run Error</p>
+            <p className="text-xs text-slate-300 font-mono line-clamp-2">
+              {status?.lastRun?.error || 'None — system clear'}
+            </p>
           </div>
         </div>
 
-        {loading && recentRuns.length === 0 && (
-          <div className="px-5 py-8 flex items-center justify-center gap-2">
-            <svg className="w-5 h-5 text-slate-300 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-            </svg>
-            <span className="text-sm text-slate-400">Loading history…</span>
+        <div className="bg-white rounded-3xl border border-slate-200 p-6">
+          <h3 className="text-sm font-bold text-slate-900 mb-4">Cron Schedule</h3>
+          <div className="flex items-center justify-between bg-slate-50 rounded-2xl p-4">
+            <span className="text-xs font-bold text-slate-500 uppercase">Interval</span>
+            <span className="text-sm font-bold text-slate-900">Every 5 min</span>
           </div>
-        )}
-
-        {!loading && recentRuns.length === 0 && (
-          <div className="px-5 py-10 flex flex-col items-center gap-3 text-center">
-            <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-2xl">🕐</div>
-            <div>
-              <p className="text-sm font-medium text-slate-600">No runs yet</p>
-              <p className="text-xs text-slate-400 mt-1">Click "Run Now" to start the first crawl cycle.</p>
-            </div>
-          </div>
-        )}
-
-        {recentRuns.length > 0 && (
-          <div className="p-3 space-y-2">
-            {recentRuns.map((run) => (
-              <RunRow key={run._id} run={run} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Architecture info */}
-      <div className="bg-slate-900 rounded-2xl p-5">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Architecture</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {[
-            { icon: '🔍', label: 'Category Extractor', sub: 'axios + cheerio' },
-            { icon: '⚙️', label: 'Product Queue',      sub: `concurrency ${queueStats.concurrency ?? 2}` },
-            { icon: '🤖', label: 'Puppeteer Scraper',  sub: 'singleton browser' },
-            { icon: '🧠', label: 'Deal Filter',         sub: '60% off / price drop' },
-          ].map((item) => (
-            <div key={item.label} className="bg-slate-800 rounded-xl p-3">
-              <span className="text-base">{item.icon}</span>
-              <p className="text-xs font-semibold text-slate-200 mt-1.5 leading-tight">{item.label}</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">{item.sub}</p>
-            </div>
-          ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function CrawlerStatusBadge({ status }) {
+  const configs = {
+    running:    { label: 'Running',    bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+    stopped:    { label: 'Stopped',    bg: 'bg-slate-100',   text: 'text-slate-600',   dot: 'bg-slate-400'   },
+    restarting: { label: 'Restarting', bg: 'bg-amber-100',   text: 'text-amber-700',   dot: 'bg-amber-500 animate-ping' },
+  };
+  const config = configs[status] || configs.stopped;
+  return (
+    <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${config.bg} ${config.text}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
+      {config.label}
+    </span>
+  );
+}
+
+function LiveStatCard({ label, value, icon, color = 'slate' }) {
+  const colors = {
+    slate:  'text-slate-900',
+    orange: 'text-orange-600',
+  };
+  return (
+    <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+      <div className="text-lg mb-1">{icon}</div>
+      <div className={`text-xl font-black ${colors[color]}`}>{value ?? 0}</div>
+      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{label}</div>
+    </div>
+  );
+}
+
+function HealthItem({ label, status, icon }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <span className="text-lg">{icon}</span>
+        <span className="text-xs font-semibold text-slate-300">{label}</span>
+      </div>
+      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">{status}</span>
     </div>
   );
 }

@@ -10,18 +10,27 @@ const router     = require('express').Router();
 const CrawlerRun = require('../models/CrawlerRun');
 const { runCrawlCycle, stopCrawl } = require('../crawler');
 const { getQueueStats } = require('../queue');
+const { getBrowserDiagnostics } = require('../scraper/browser');
+const { state: cronState } = require('../cronState');
 const logger     = require('../../utils/logger');
-
-let _running = false;
 
 router.get('/status', async (req, res, next) => {
   try {
     const lastRun = await CrawlerRun.findOne().sort({ startedAt: -1 }).lean();
+    const running = global.crawlerRunning || cronState.running || false;
+    
+    logger.info(`[CrawlerControl] STATUS running=${running}`);
+    
     res.json({
       success: true,
-      running: _running,
-      status:  _running ? 'running' : 'stopped',
-      queues:  getQueueStats(),
+      running,
+      status:  running ? 'running' : 'stopped',
+      currentCategory: global.currentCategory || 'Idle',
+      productsScanned: global.productsScanned || 0,
+      dealsSent:       global.dealsPosted || 0,
+      lastRunTime:     global.lastCrawlerRun || (lastRun ? lastRun.startedAt : null),
+      browserPages:    getBrowserDiagnostics().pageCount || 0,
+      queueSize:       getQueueStats().totalQueued || 0,
       lastRun,
     });
   } catch (err) {
@@ -30,28 +39,68 @@ router.get('/status', async (req, res, next) => {
 });
 
 router.post('/start', async (req, res) => {
-  if (_running) {
-    return res.status(409).json({ success: false, error: 'Crawl cycle already running' });
+  const running = global.crawlerRunning || cronState.running || false;
+  if (running) {
+    logger.info('[CrawlerControl] START requested but already running');
+    return res.status(409).json({ success: false, error: 'Crawler is already running' });
   }
 
-  res.json({ success: true, message: 'Crawl cycle started' });
+  logger.info('[CrawlerControl] START requested');
+  res.json({ success: true, message: 'Crawler Started' });
 
-  _running = true;
+  // Update unified state
+  cronState.running = true; 
+  global.crawlerRunning = true;
+
   setImmediate(() => {
     runCrawlCycle()
-      .then((stats) => logger.info(`[API] Manual crawl done: ${JSON.stringify(stats)}`))
-      .catch((err) => logger.error(`[API] Manual crawl failed: ${err.message}`))
-      .finally(() => { _running = false; });
+      .then((stats) => logger.info(`[CrawlerControl] Cycle completed: ${JSON.stringify(stats)}`))
+      .catch((err) => logger.error(`[CrawlerControl] Cycle failed: ${err.message}`))
+      .finally(() => { 
+        cronState.running = false; 
+        global.crawlerRunning = false;
+      });
   });
 });
 
 router.post('/stop', (req, res) => {
-  if (!_running) {
-    return res.status(409).json({ success: false, error: 'No crawl cycle currently running', status: 'stopped' });
+  const running = global.crawlerRunning || cronState.running || false;
+  if (!running) {
+    logger.info('[CrawlerControl] STOP requested but already stopped');
+    return res.status(409).json({ success: false, error: 'Crawler is already stopped' });
   }
+
+  logger.info('[CrawlerControl] STOP requested');
   stopCrawl();
-  logger.info('[API] Crawler stop requested via API');
-  res.json({ success: true, message: 'Crawler stop requested', status: 'stopping' });
+  
+  res.json({ success: true, message: 'Crawler Stopped' });
+});
+
+router.post('/restart', async (req, res) => {
+  logger.info('[CrawlerControl] RESTART requested');
+  
+  const running = global.crawlerRunning || cronState.running || false;
+  if (running) {
+    stopCrawl();
+    // Wait a bit for it to stop
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  // Start a new cycle
+  cronState.running = true;
+  global.crawlerRunning = true;
+
+  setImmediate(() => {
+    runCrawlCycle()
+      .then((stats) => logger.info(`[CrawlerControl] Restart cycle completed: ${JSON.stringify(stats)}`))
+      .catch((err) => logger.error(`[CrawlerControl] Restart cycle failed: ${err.message}`))
+      .finally(() => { 
+        cronState.running = false;
+        global.crawlerRunning = false;
+      });
+  });
+
+  res.json({ success: true, message: 'Crawler Restarted' });
 });
 
 router.get('/runs', async (req, res, next) => {

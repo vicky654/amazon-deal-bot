@@ -4,18 +4,18 @@
  * GET /api/debug/crawler  → live status + env check + telegram ping
  */
 
-const router     = require('express').Router();
+const router = require('express').Router();
 const CrawlerRun = require('../models/CrawlerRun');
-const Deal       = require('../models/Deal');
-const { getQueueStats }    = require('../queue');
+const Deal = require('../models/Deal');
+const { getQueueStats } = require('../queue');
 const { state: cronState } = require('../cronState');
-const { metrics: scraperMetrics }   = require('../scraper/amazon');
+const { metrics: scraperMetrics } = require('../scraper/amazon');
 const { metrics: extractorMetrics } = require('../crawler/extractor');
-const antiBot                        = require('../crawler/antiBot');
-const autoMode   = require('../autoMode');
-const telegram   = require('../../telegram');
-const logger     = require('../../utils/logger');
-const fs         = require('fs');
+const antiBot = require('../crawler/antiBot');
+const autoMode = require('../autoMode');
+const telegram = require('../../telegram');
+const logger = require('../../utils/logger');
+const fs = require('fs');
 
 function checkEnvVar(name) {
   const val = process.env[name];
@@ -26,12 +26,12 @@ function checkChrome() {
   const puppeteer = require('puppeteer');
   try {
     const bundledPath = puppeteer.executablePath();
-    const exists      = bundledPath && fs.existsSync(bundledPath);
+    const exists = bundledPath && fs.existsSync(bundledPath);
     return {
-      found:  exists,
-      path:   bundledPath,
+      found: exists,
+      path: bundledPath,
       source: 'bundled',
-      hint:   exists ? null : 'Chromium missing — PUPPETEER_SKIP_CHROMIUM_DOWNLOAD must NOT be set; redeploy to re-download it',
+      hint: exists ? null : 'Chromium missing — PUPPETEER_SKIP_CHROMIUM_DOWNLOAD must NOT be set; redeploy to re-download it',
     };
   } catch (e) {
     return { found: false, path: null, source: null, hint: e.message };
@@ -47,7 +47,7 @@ router.get('/crawler', async (req, res) => {
     ]);
 
     let isTelegramWorking = false;
-    let telegramError     = null;
+    let telegramError = null;
     try {
       isTelegramWorking = await telegram.sendTestMessage();
     } catch (e) {
@@ -57,62 +57,62 @@ router.get('/crawler', async (req, res) => {
     const chrome = checkChrome();
 
     const env = {
-      TELEGRAM_TOKEN:            checkEnvVar('TELEGRAM_TOKEN'),
-      TELEGRAM_CHAT:             checkEnvVar('TELEGRAM_CHAT'),
-      MONGODB_URI:               checkEnvVar('MONGODB_URI'),
-      JWT_SECRET:                checkEnvVar('JWT_SECRET'),
-      ALLOWED_ORIGINS:   checkEnvVar('ALLOWED_ORIGINS'),
+      TELEGRAM_TOKEN: checkEnvVar('TELEGRAM_TOKEN'),
+      TELEGRAM_CHAT: checkEnvVar('TELEGRAM_CHAT'),
+      MONGODB_URI: checkEnvVar('MONGODB_URI'),
+      JWT_SECRET: checkEnvVar('JWT_SECRET'),
+      ALLOWED_ORIGINS: checkEnvVar('ALLOWED_ORIGINS'),
       AUTO_MODE_DEFAULT: checkEnvVar('AUTO_MODE_DEFAULT'),
       NODE_ENV: { set: true, preview: process.env.NODE_ENV || 'development' },
       // These must NOT be set — flagged here if someone accidentally re-adds them
       // puppeteer v21 uses PUPPETEER_SKIP_DOWNLOAD (not the old CHROMIUM variant)
       PUPPETEER_SKIP_DOWNLOAD: {
-        set:    !!process.env.PUPPETEER_SKIP_DOWNLOAD,
+        set: !!process.env.PUPPETEER_SKIP_DOWNLOAD,
         danger: process.env.PUPPETEER_SKIP_DOWNLOAD === 'true'
-                  ? '⛔ DELETE THIS — puppeteer v21 checks this exact name; Chromium will NOT download'
-                  : null,
+          ? '⛔ DELETE THIS — puppeteer v21 checks this exact name; Chromium will NOT download'
+          : null,
       },
       PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: {
-        set:    !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD,
+        set: !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD,
         danger: process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD === 'true'
-                  ? '⛔ DELETE THIS — old puppeteer name, still blocks download'
-                  : null,
+          ? '⛔ DELETE THIS — old puppeteer name, still blocks download'
+          : null,
       },
       PUPPETEER_EXECUTABLE_PATH: {
-        set:    !!process.env.PUPPETEER_EXECUTABLE_PATH,
+        set: !!process.env.PUPPETEER_EXECUTABLE_PATH,
         danger: process.env.PUPPETEER_EXECUTABLE_PATH
-                  ? '⛔ DELETE THIS — use puppeteer.executablePath() instead'
-                  : null,
+          ? '⛔ DELETE THIS — use puppeteer.executablePath() instead'
+          : null,
       },
     };
 
     res.json({
       // Global runtime counters (set by crawler/index.js)
       crawler: {
-        running:                   global.crawlerRunning            ?? cronState.running,
-        lastRun:                   global.lastCrawlerRun            ?? cronState.lastRun,
-        dealsScraped:              global.dealsScraped              ?? 0,
-        dealsPosted:               global.dealsPosted               ?? 0,
-        lastError:                 global.lastCrawlerError          ?? null,
+        running: global.crawlerRunning ?? cronState.running,
+        lastRun: global.lastCrawlerRun ?? cronState.lastRun,
+        dealsScraped: global.dealsScraped ?? 0,
+        dealsPosted: global.dealsPosted ?? 0,
+        lastError: global.lastCrawlerError ?? null,
         lastSuccessfulTelegramSend: global.lastSuccessfulTelegramSend ?? null,
       },
-      status:          (global.crawlerRunning ?? cronState.running) ? 'running' : 'stopped',
-      autoMode:        autoMode.state.enabled,
+      status: (global.crawlerRunning ?? cronState.running) ? 'running' : 'stopped',
+      autoMode: autoMode.state.enabled,
       autoModeUpdatedAt: autoMode.state.updatedAt,
       cron: {
-        running:    cronState.running,
-        lastRun:    cronState.lastRun,
-        nextRun:    cronState.nextRun,
-        schedule:   process.env.CRON_SCHEDULE || '*/15 * * * *',
+        running: cronState.running,
+        lastRun: cronState.lastRun,
+        nextRun: cronState.nextRun,
+        schedule: process.env.CRON_SCHEDULE || '*/5 * * * *',
         recentLogs: cronState.logs.slice(0, 10),
       },
       lastDbRun: lastRun ? {
-        status:     lastRun.status,
-        startedAt:  lastRun.startedAt,
+        status: lastRun.status,
+        startedAt: lastRun.startedAt,
         finishedAt: lastRun.finishedAt,
         durationMs: lastRun.durationMs,
-        stats:      lastRun.stats,
-        error:      lastRun.error || null,
+        stats: lastRun.stats,
+        error: lastRun.error || null,
       } : null,
       db: {
         totalDeals,
@@ -122,35 +122,35 @@ router.get('/crawler', async (req, res) => {
       queue: getQueueStats(),
       skipMetrics: {
         extractor: extractorMetrics,  // skipped_no_price, enqueued
-        scraper:   scraperMetrics,    // skipped_redirect, skipped_unavailable, skipped_bot_captcha, skipped_dom, success, error_exhausted
+        scraper: scraperMetrics,    // skipped_redirect, skipped_unavailable, skipped_bot_captcha, skipped_dom, success, error_exhausted
       },
       antiBot: {
-        stats:           antiBot.stats,
-        blacklisted:     antiBot.getBlacklisted(),
+        stats: antiBot.stats,
+        blacklisted: antiBot.getBlacklisted(),
         budgetRemaining: antiBot.budgetRemaining(),
       },
       telegram: {
         isTelegramWorking,
-        tokenSet:  env.TELEGRAM_TOKEN.set,
+        tokenSet: env.TELEGRAM_TOKEN.set,
         chatIdSet: env.TELEGRAM_CHAT.set,
-        chatId:    env.TELEGRAM_CHAT.preview,
-        error:     telegramError,
+        chatId: env.TELEGRAM_CHAT.preview,
+        error: telegramError,
       },
       chrome: {
-        found:  chrome.found,
-        path:   chrome.path,
+        found: chrome.found,
+        path: chrome.path,
         source: chrome.source,
-        hint:   chrome.hint || null,
+        hint: chrome.hint || null,
       },
       env,
       system: {
         nodeVersion: process.version,
-        platform:    process.platform,
-        uptime:      Math.round(process.uptime()),
+        platform: process.platform,
+        uptime: Math.round(process.uptime()),
         memory: {
-          usedMB:  Math.round(process.memoryUsage().heapUsed  / 1024 / 1024),
+          usedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
           totalMB: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
-          rssMB:   Math.round(process.memoryUsage().rss       / 1024 / 1024),
+          rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
         },
       },
     });

@@ -175,8 +175,15 @@ async function processProduct(url, { category = 'unknown' } = {}, stats) {
 
     if (!product || !product.title) {
       logger.warn(`Skipping ${url} — no product data returned`);
+      logger.info(`[Crawler][SKIP] invalid product`);
       stats.errors++;
       return;
+    }
+
+    if (!product.asin) {
+      logger.info(`[Crawler][SKIP] no asin`);
+    } else {
+      logger.info(`[Crawler] ASIN extracted`);
     }
 
     // Evaluate against deal filter (discount threshold + price history)
@@ -184,32 +191,52 @@ async function processProduct(url, { category = 'unknown' } = {}, stats) {
 
     if (!shouldPost) {
       logger.info(`Skip: "${product.title.slice(0, 50)}…" — ${reason}`);
+      if (reason.includes('No ASIN')) {
+         logger.info(`[Crawler][SKIP] no asin`);
+      } else {
+         logger.info(`[Crawler][SKIP] low discount`);
+      }
       return;
     }
 
     stats.dealsFound++;
     logger.info(`Deal: "${product.title.slice(0, 50)}…" — ${reason}`);
+    logger.info(`[Crawler] Deal approved`);
 
     // Upsert to MongoDB (updates price history even if already exists)
     const deal = await upsertDeal(product, category, dealType, reason);
 
     // Only post to Telegram if not already posted (prevents re-posts on price updates)
     if (!deal.posted) {
-      await postDealToTelegram(deal);
+      logger.info(`[Crawler] Sending to Telegram`);
+      try {
+        await postDealToTelegram(deal);
 
-      await Deal.findByIdAndUpdate(deal._id, {
-        posted: true,
-        postedAt: new Date(),
-      });
+        await Deal.findByIdAndUpdate(deal._id, {
+          posted: true,
+          postedAt: new Date(),
+        });
 
-      stats.dealsPosted++;
-      logger.info(`Posted to Telegram: "${deal.title.slice(0, 50)}…"`);
+        stats.dealsPosted++;
+        logger.info(`Posted to Telegram: "${deal.title.slice(0, 50)}…"`);
+      } catch (err) {
+        logger.info(`[Crawler][SKIP] telegram failed`);
+        stats.errors++;
+        logger.error(`Telegram post failed [${url}]: ${err.message}`);
+        return;
+      }
     } else {
       logger.info(`Already posted: ASIN ${deal.asin} — skipping Telegram`);
+      logger.info(`[Crawler][SKIP] duplicate`);
     }
   } catch (error) {
     stats.errors++;
     logger.error(`processProduct failed [${url}]: ${error.message}`);
+    if (error.message && error.message.includes('Bot detection')) {
+      logger.info(`[Crawler][SKIP] bot-wall`);
+    } else {
+      logger.info(`[Crawler][SKIP] invalid product`);
+    }
   }
 }
 

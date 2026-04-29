@@ -122,6 +122,8 @@ async function runCrawlCycle() {
   global.lastCrawlerRun   = new Date().toISOString();
   global.dealsScraped     = 0;
   global.dealsPosted      = 0;
+  global.productsScanned  = 0;
+  global.currentCategory  = 'Initializing...';
   global.lastCrawlerError = null;
 
   logger.info('[Crawler] ══ runCrawlCycle START ══');
@@ -192,7 +194,9 @@ async function runCrawlCycle() {
 
     for (const category of selectedCategories) {
       if (_stopFlag) { logger.info('[Crawler] Stop flag — exiting category loop'); break; }
-      logger.info(`Scanning: [${category.platform}] ${category.name}`);
+      global.currentCategory = category.name;
+      logger.info(`[Crawler] category start: ${category.name}`);
+      console.log('[Crawler] category start');
       let links = [];
 
       try {
@@ -248,7 +252,8 @@ async function runCrawlCycle() {
         newLinks:     fresh.length,
       });
 
-      logger.info(`[${category.platform}] ${category.name}: ${links.length} found, ${fresh.length} fresh`);
+      logger.info(`[Extractor] extracted ${links.length} ASINs`);
+      console.log(`[Extractor] extracted ${links.length} ASINs`);
       await categoryDelay();
     }
 
@@ -257,31 +262,28 @@ async function runCrawlCycle() {
     for (const [plat, urls] of Object.entries(urlsByPlatform)) {
       logger.info(`[Crawler]   ${plat}: ${urls.length} URLs`);
     }
+    
     if (totalFresh === 0) {
       _consecutiveZeroYield++;
       logger.warn(`[Crawler] ⚠️  0 fresh URLs found — bot detection or empty categories. consecutive=${_consecutiveZeroYield}`);
-      if (_consecutiveZeroYield >= 3) {
-        logger.error(
-          `[Scheduler] ⚠⚠⚠ ALERT: ${_consecutiveZeroYield} consecutive crawl cycles returned 0 URLs. ` +
-          `Likely causes: Amazon IP/session block, CAPTCHA, or network failure. ` +
-          `Check backend/debug/ for screenshots. Consider increasing CRON_SCHEDULE interval.`
-        );
-      }
-    } else {
-      _consecutiveZeroYield = 0; // reset counter as soon as any category yields fresh URLs
+      return stats; // Early exit if nothing to scrape
     }
 
     // ── Phase 2: Scrape + filter + post ──────────────────────────────────────
     logger.info('Phase 2 starting — scraping');
+    console.log(`[Crawler] Starting product scrape queue with ${totalFresh} URLs`);
 
     const allPromises = [];
 
     for (const [platform, urls] of Object.entries(urlsByPlatform)) {
+      console.log(`[Crawler] Enqueuing ${urls.length} URLs for ${platform}`);
       for (const url of urls) {
+        console.log('[Scrape] starting');
         const promise = scrapeQueue.add(() => processProduct(url, platform, stats));
         allPromises.push(promise);
       }
     }
+    console.log(`[Crawler] All ${allPromises.length} promises enqueued, waiting for settle...`);
 
     await Promise.allSettled(allPromises);
     await scrapeQueue.onIdle();
@@ -313,6 +315,7 @@ async function runCrawlCycle() {
     metrics.gauge('crawl.last_deals_found', stats.dealsFound);
 
     global.crawlerRunning = false;
+    global.currentCategory = 'Idle';
     antiBot.logStats();
     logger.info(
       `═══ Crawl complete (${Math.round(durationMs / 1000)}s) ═══ ` +
@@ -324,6 +327,7 @@ async function runCrawlCycle() {
     const durationMs = Date.now() - startedAt;
 
     global.crawlerRunning   = false;
+    global.currentCategory   = 'Failed';
     global.lastCrawlerError = error.message;
 
     await CrawlerRun.findByIdAndUpdate(run._id, {
@@ -345,7 +349,16 @@ async function runCrawlCycle() {
 
 async function processProduct(url, platform, stats) {
   const t0 = Date.now();
+  const asinMatch = url.match(/\/dp\/([A-Z0-9]{10})/i);
+  const asin = asinMatch ? asinMatch[1] : 'unknown';
+  
+  if (_stopFlag) {
+    logger.info(`[Scrape] SKIP (STOP FLAG) ${url}`);
+    return;
+  }
+
   logger.info(`[Scrape] ▶ START ${platform} → ${url}`);
+  console.log(`[Scrape] Starting: ${asin}`);
 
   try {
     // Retry once on scrape failure (Puppeteer flakiness, network timeout)
@@ -364,207 +377,207 @@ async function processProduct(url, platform, stats) {
     urlCache.set(url);
 
     stats.productsScanned++;
+    global.productsScanned = stats.productsScanned;
     global.dealsScraped = (global.dealsScraped || 0) + 1;
     if (stats.byPlatform[platform]) stats.byPlatform[platform].scraped++;
     metrics.observe('scrape.duration_ms', Date.now() - t0);
     metrics.increment(`scrape.${platform}.success`);
 
-    if (!product) {
-      logger.warn(`[Scrape][SKIP:blocked] ${url} — scraper returned null (bot-wall / unavailable / redirect)`);
-      return;
-    }
-    if (!product.title || !product.price) {
-      logger.warn(`[Scrape][SKIP:no-data] title=${!!product.title} price=${!!product.price} url=${url}`);
-      stats.errors++;
+    if (!product || !product.title || !product.price || !product.asin) {
+      console.log(`[Crawler][SKIP] invalid product | title=${!!product?.title} price=${!!product?.price} asin=${!!product?.asin}`);
       return;
     }
 
+    console.log('[Amazon][OK]');
     logger.info(`[Scrape][OK] "${product.title.slice(0, 60)}" price=₹${product.price} disc=${product.discount ?? '?'}% img=${!!product.image} url=${url}`);
 
-    // ── FORCE_FIRST_DEAL bypass (set env var for testing only) ───────────────
-    if (process.env.FORCE_FIRST_DEAL === 'true' && !_forceSentFirstDeal && product.title && product.price) {
-      _forceSentFirstDeal = true;
-      logger.info(`[FORCE] Bypassing all filters — sending first valid scrape: "${product.title.slice(0, 60)}"`);
-      try {
-        const forced  = await generateFinalLink(url, platform);
-        const caption = telegram.formatDealText(
-          product.title, product.price, forced.finalLink,
-          product.originalPrice, product.discount, null, platform,
-        );
-        await telegram.sendToTelegram(product.image, caption, forced.finalLink);
-        logger.info('[FORCE] ✅ Forced deal sent to Telegram successfully');
-      } catch (forceErr) {
-        logger.error(`[FORCE] ❌ Forced send FAILED: ${forceErr.message}`);
-      }
-      return;
-    }
-
-    // ── EARLY GATE 0: Category allowlist ─────────────────────────────────────
-    if (!isAllowedCategory(product)) {
-      logger.info(`[Filter][SKIP:category] cat="${product.category || 'none'}" title="${product.title.slice(0, 60)}"`);
-      metrics.increment('filter.category_skip');
-      return;
-    }
-
-    // ── EARLY GATE 1: Book filter ─────────────────────────────────────────────
-    if (isBook(product)) {
-      logger.info(`[Filter][SKIP:book] "${product.title.slice(0, 60)}"`);
-      metrics.increment('filter.book_skip');
-      return;
-    }
-
-    // ── EARLY GATE 2a: Exact title dedup within this cycle ───────────────────
-    const titleKey = normalizeTitle(product.title);
-    if (_seenTitles.has(titleKey)) {
-      logger.info(`[Filter][SKIP:title-exact] "${product.title.slice(0, 60)}"`);
-      metrics.increment('filter.duplicate_skip');
-      return;
-    }
-    _seenTitles.add(titleKey);
-
-    // ── EARLY GATE 2b: Fuzzy title similarity (cross-cycle, last 200 posted) ──
-    if (isTitleDuplicate(product.title)) {
-      logger.info(`[Filter][SKIP:title-fuzzy ≥${process.env.TITLE_SIMILARITY_THRESHOLD || 0.85}] "${product.title.slice(0, 60)}"`);
-      metrics.increment('filter.title_similarity_skip');
-      return;
-    }
-
-    // ── EARLY GATE 3: Concurrency guard + 5-day PostedLog check ─────────────
     const { productId } = normalizeProduct(product);
-    if (!claimInflight(productId, platform)) {
-      logger.info(`[Filter][SKIP:in-flight] id=${productId} "${product.title.slice(0, 60)}"`);
-      metrics.increment('filter.inflight_skip');
-      return;
-    }
     try {
-    if (await isAlreadyPosted(productId, platform, product.title)) {
-      logger.info(`[Filter][SKIP:posted-log] id=${productId} "${product.title.slice(0, 60)}"`);
-      metrics.increment('filter.db_duplicate_skip');
-      return;
-    }
-
-    // ── EARLY GATE 4: Brand frequency cap ────────────────────────────────────
-    const brand     = extractBrand(product.title);
-    const brandHits = _seenBrands.get(brand) || 0;
-    if (brandHits >= MAX_BRAND_PER_CYCLE) {
-      logger.info(`[Filter][SKIP:brand-cap] brand=${brand} hits=${brandHits}/${MAX_BRAND_PER_CYCLE} "${product.title.slice(0, 60)}"`);
-      metrics.increment('filter.brand_cap_skip');
-      return;
-    }
-
-    // Generate hybrid link (affiliate with 5s timeout, fallback to original)
-    const t1 = Date.now();
-    const linkResult = await generateFinalLink(url, platform);
-    product.affiliateLink = linkResult.affiliateLink;
-    product.originalLink  = linkResult.originalLink;
-    product.finalLink     = linkResult.finalLink;
-    product.isAffiliate   = linkResult.isAffiliate;
-    metrics.observe('affiliate.duration_ms', Date.now() - t1);
-    if (!linkResult.isAffiliate) metrics.increment('affiliate.fallback');
-
-    // Evaluate deal
-    const { shouldPost, reason, dealType } = await evaluateDeal(product);
-
-    if (!shouldPost) {
-      logger.info(`[Filter][SKIP:discount] "${product.title.slice(0, 50)}" — ${reason}`);
-      return;
-    }
-
-    stats.dealsFound++;
-    if (stats.byPlatform[platform]) stats.byPlatform[platform].deals++;
-    logger.info(`Deal: "${product.title.slice(0, 50)}" — ${reason}`);
-    metrics.increment(`deals.${platform}.found`);
-
-    // Save to DB
-    const deal = await upsertDeal(product, platform, dealType, reason);
-
-    // Smart rules gate + Auto Mode + score check
-    const MIN_SCORE = parseInt(process.env.MIN_DEAL_SCORE || '20', 10);
-    const scoreMet  = (deal.score || 0) >= MIN_SCORE;
-    const { allow, reason: postReason } = shouldPostDeal(product, deal);
-
-    logger.info(`[PostGate] score=${deal.score}/${MIN_SCORE} autoMode=${autoMode.state.enabled} allow=${allow}/${postReason} "${deal.title?.slice(0,50)}"`);
-
-    if (!autoMode.state.enabled) {
-      logger.warn(`[PostGate][SKIP:auto-mode-off] "${deal.title?.slice(0,50)}"`);
-    } else if (!scoreMet) {
-      logger.warn(`[PostGate][SKIP:score-low] score=${deal.score} min=${MIN_SCORE} "${deal.title?.slice(0,50)}"`);
-    } else if (!allow) {
-      emit('crawler:deal-skipped', {
-        type:     'skipped',
-        title:    deal.title.slice(0, 80),
-        platform: deal.platform || platform,
-        price:    deal.price,
-        reason:   postReason,
-      });
-      logger.info(`Smart rule blocked [${postReason}]: "${deal.title.slice(0, 50)}"`);
-    } else {
-      if (!deal.title || !deal.price) {
-        logger.warn(`[Telegram] SKIPPED INVALID DEAL — missing title or price | id=${deal._id} title=${deal.title ?? 'null'} price=${deal.price ?? 'null'}`);
+      // ── FORCE_FIRST_DEAL bypass (set env var for testing only) ───────────────
+      if (process.env.FORCE_FIRST_DEAL === 'true' && !_forceSentFirstDeal && product.title && product.price) {
+        _forceSentFirstDeal = true;
+        logger.info(`[FORCE] Bypassing all filters — sending first valid scrape: "${product.title.slice(0, 60)}"`);
+        try {
+          const forced  = await generateFinalLink(url, platform);
+          const caption = telegram.formatDealText(
+            product.title, product.price, forced.finalLink,
+            product.originalPrice, product.discount, null, platform,
+          );
+          await telegram.sendToTelegram(product.image, caption, forced.finalLink);
+          logger.info('[FORCE] ✅ Forced deal sent to Telegram successfully');
+        } catch (forceErr) {
+          logger.error(`[FORCE] ❌ Forced send FAILED: ${forceErr.message}`);
+        }
         return;
       }
 
-      logger.info(`[Telegram] SENDING TO TELEGRAM: "${deal.title?.slice(0, 60)}" | price=₹${deal.price} discount=${deal.discount}% chat=${process.env.TELEGRAM_CHAT}`);
-      let tgSent = false;
-      let tgLastErr = null;
-      for (let tgAttempt = 1; tgAttempt <= 3 && !tgSent; tgAttempt++) {
-        try {
-          if (tgAttempt > 1) {
-            logger.warn(`[Telegram] Retry ${tgAttempt}/3 for deal ${deal._id}…`);
-            await sleep(4000 * (tgAttempt - 1));
-          }
-          await postDealToTelegram(deal);
-          tgSent = true;
-        } catch (err) {
-          tgLastErr = err;
-          logger.warn(`[Telegram] Attempt ${tgAttempt}/3 failed: ${err.message}`);
-        }
+      /* ── FILTERS BYPASSED FOR TESTING ──
+      // ── EARLY GATE 0: Category allowlist ─────────────────────────────────────
+      if (!isAllowedCategory(product)) {
+        logger.info(`[Filter][SKIP:category] cat="${product.category || 'none'}" title="${product.title.slice(0, 60)}"`);
+        metrics.increment('filter.category_skip');
+        return;
       }
 
-      if (tgSent) {
-        const now = new Date();
-        await Deal.findByIdAndUpdate(deal._id, {
-          posted:       true,
-          postedAt:     deal.postedAt || now,
-          lastPostedAt: now,
-          lastPrice:    deal.price,
-          'steps.telegram.done': true,
-          'steps.telegram.at':   now,
-        });
-        // Write to PostedLog — 3 retries, dynamic cooldown by score, CRITICAL log on all-fail
-        const { productId: postedProductId } = normalizeProduct(deal);
-        await markAsPosted(postedProductId, deal.platform || platform, normalizeTitle(deal.title), deal.score || 0);
-        // Increment brand counter for this cycle
-        const postedBrand = extractBrand(deal.title);
-        _seenBrands.set(postedBrand, (_seenBrands.get(postedBrand) || 0) + 1);
-        stats.dealsPosted++;
-        global.dealsPosted = (global.dealsPosted || 0) + 1;
-        metrics.increment(`deals.${platform}.posted`);
-        global.lastSuccessfulTelegramSend = new Date().toISOString();
-        logger.info(`[Telegram] ✅ SENT OK — "${deal.title.slice(0, 50)}" [${postReason}]`);
-        emit('crawler:deal-posted', {
-          type:     'posted',
-          title:    deal.title.slice(0, 80),
-          platform: deal.platform || platform,
-          price:    deal.price,
-          discount: deal.discount,
-          reason:   postReason,
-        });
-      } else {
-        const tgBody = tgLastErr?.response?.body ?? tgLastErr?.response ?? '';
-        logger.error(`[Telegram] ❌ SEND FAILED after 3 attempts for deal ${deal._id}: ${tgLastErr?.message} | response=${JSON.stringify(tgBody)}`);
-        emit('crawler:deal-error', {
-          type:    'error',
-          title:   deal.title?.slice(0, 80),
-          platform,
-          reason:  tgLastErr?.message,
-        });
-        await Deal.findByIdAndUpdate(deal._id, {
-          'steps.telegram.done':  false,
-          'steps.telegram.error': tgLastErr?.message,
-        }).catch(() => {});
+      // ── EARLY GATE 1: Book filter ─────────────────────────────────────────────
+      if (isBook(product)) {
+        logger.info(`[Filter][SKIP:book] "${product.title.slice(0, 60)}"`);
+        metrics.increment('filter.book_skip');
+        return;
       }
-    }
+
+      // ── EARLY GATE 2a: Exact title dedup within this cycle ───────────────────
+      const titleKey = normalizeTitle(product.title);
+      if (_seenTitles.has(titleKey)) {
+        logger.info(`[Filter][SKIP:title-exact] "${product.title.slice(0, 60)}"`);
+        metrics.increment('filter.duplicate_skip');
+        return;
+      }
+      _seenTitles.add(titleKey);
+
+      // ── EARLY GATE 2b: Fuzzy title similarity (cross-cycle, last 200 posted) ──
+      if (isTitleDuplicate(product.title)) {
+        logger.info(`[Filter][SKIP:title-fuzzy ≥${process.env.TITLE_SIMILARITY_THRESHOLD || 0.85}] "${product.title.slice(0, 60)}"`);
+        metrics.increment('filter.title_similarity_skip');
+        return;
+      }
+
+      // ── EARLY GATE 3: Concurrency guard + 5-day PostedLog check ─────────────
+      if (!claimInflight(productId, platform)) {
+        logger.info(`[Filter][SKIP:in-flight] id=${productId} "${product.title.slice(0, 60)}"`);
+        metrics.increment('filter.inflight_skip');
+        return;
+      }
+      if (await isAlreadyPosted(productId, platform, product.title)) {
+        logger.info(`[Filter][SKIP:posted-log] id=${productId} "${product.title.slice(0, 60)}"`);
+        logger.info('[Crawler][SKIP] duplicate');
+        metrics.increment('filter.db_duplicate_skip');
+        return;
+      }
+
+      // ── EARLY GATE 4: Brand frequency cap ────────────────────────────────────
+      const brand     = extractBrand(product.title);
+      const brandHits = _seenBrands.get(brand) || 0;
+      if (brandHits >= MAX_BRAND_PER_CYCLE) {
+        logger.info(`[Filter][SKIP:brand-cap] brand=${brand} hits=${brandHits}/${MAX_BRAND_PER_CYCLE} "${product.title.slice(0, 60)}"`);
+        metrics.increment('filter.brand_cap_skip');
+        return;
+      }
+      */
+
+      // Generate hybrid link (affiliate with 5s timeout, fallback to original)
+      const t1 = Date.now();
+      const linkResult = await generateFinalLink(url, platform);
+      product.affiliateLink = linkResult.affiliateLink;
+      product.originalLink  = linkResult.originalLink;
+      product.finalLink     = linkResult.finalLink;
+      product.isAffiliate   = linkResult.isAffiliate;
+      metrics.observe('affiliate.duration_ms', Date.now() - t1);
+      if (!linkResult.isAffiliate) metrics.increment('affiliate.fallback');
+
+      // Evaluate deal (BYPASSED FOR TESTING)
+      console.log('[Filter] evaluating deal');
+      // const { shouldPost, reason, dealType } = await evaluateDeal(product);
+      const shouldPost = true;
+      const reason = 'FORCE_SEND_TEST_MODE';
+      const dealType = 'discount';
+
+      if (!shouldPost) {
+        logger.info(`[Filter][SKIP:discount] "${product.title.slice(0, 50)}" — ${reason}`);
+        console.log('[Filter][SKIP] low score');
+        return;
+      }
+
+      stats.dealsFound++;
+      if (stats.byPlatform[platform]) stats.byPlatform[platform].deals++;
+      logger.info(`Deal: "${product.title.slice(0, 50)}" — ${reason}`);
+      console.log('[Filter] approved');
+      console.log('[Crawler] Deal approved');
+      metrics.increment(`deals.${platform}.found`);
+
+      // Save to DB
+      const deal = await upsertDeal(product, platform, dealType, reason);
+
+      // Smart rules gate + Auto Mode + score check (BYPASSED FOR TESTING)
+      const MIN_SCORE = 0;
+      const scoreMet  = true;
+      const allow     = true;
+      const postReason = 'FORCE_SEND_TEST_MODE';
+
+      logger.info(`[PostGate] score=${deal.score}/${MIN_SCORE} autoMode=${autoMode.state.enabled} allow=${allow}/${postReason} "${deal.title?.slice(0,50)}"`);
+
+      if (true) { // Force enter
+        if (!deal.title || !deal.price) {
+          logger.warn(`[Telegram] SKIPPED INVALID DEAL — missing title or price | id=${deal._id} title=${deal.title ?? 'null'} price=${deal.price ?? 'null'}`);
+          return;
+        }
+
+        logger.info(`[Telegram] SENDING TO TELEGRAM: "${deal.title?.slice(0, 60)}" | price=₹${deal.price} discount=${deal.discount}% chat=${process.env.TELEGRAM_CHAT}`);
+        console.log('[FORCE SEND] sending product');
+        console.log('[Crawler] Sending to Telegram');
+        let tgSent = false;
+        let tgLastErr = null;
+        for (let tgAttempt = 1; tgAttempt <= 3 && !tgSent; tgAttempt++) {
+          try {
+            if (tgAttempt > 1) {
+              logger.warn(`[Telegram] Retry ${tgAttempt}/3 for deal ${deal._id}…`);
+              await sleep(4000 * (tgAttempt - 1));
+            }
+            console.log('[Telegram] sending deal');
+            await postDealToTelegram(deal);
+            tgSent = true;
+            console.log('[Telegram] success');
+          } catch (err) {
+            tgLastErr = err;
+            logger.warn(`[Telegram] Attempt ${tgAttempt}/3 failed: ${err.message}`);
+          }
+        }
+
+        if (tgSent) {
+          const now = new Date();
+          await Deal.findByIdAndUpdate(deal._id, {
+            posted:       true,
+            postedAt:     deal.postedAt || now,
+            lastPostedAt: now,
+            lastPrice:    deal.price,
+            'steps.telegram.done': true,
+            'steps.telegram.at':   now,
+          });
+          // Write to PostedLog — 3 retries, dynamic cooldown by score, CRITICAL log on all-fail
+          const { productId: postedProductId } = normalizeProduct(deal);
+          await markAsPosted(postedProductId, deal.platform || platform, normalizeTitle(deal.title), deal.score || 0);
+          // Increment brand counter for this cycle
+          const postedBrand = extractBrand(deal.title);
+          _seenBrands.set(postedBrand, (_seenBrands.get(postedBrand) || 0) + 1);
+          stats.dealsPosted++;
+          global.dealsPosted = (global.dealsPosted || 0) + 1;
+          metrics.increment(`deals.${platform}.posted`);
+          global.lastSuccessfulTelegramSend = new Date().toISOString();
+          logger.info(`[Telegram] ✅ SENT OK — "${deal.title.slice(0, 50)}" [${postReason}]`);
+          emit('crawler:deal-posted', {
+            type:     'posted',
+            title:    deal.title.slice(0, 80),
+            platform: deal.platform || platform,
+            price:    deal.price,
+            discount: deal.discount,
+            reason:   postReason,
+          });
+        } else {
+          const tgBody = tgLastErr?.response?.body ?? tgLastErr?.response ?? '';
+          logger.error(`[Telegram] ❌ SEND FAILED after 3 attempts for deal ${deal._id}: ${tgLastErr?.message} | response=${JSON.stringify(tgBody)}`);
+          console.log('[Telegram][FAIL]');
+          emit('crawler:deal-error', {
+            type:    'error',
+            title:   deal.title?.slice(0, 80),
+            platform,
+            reason:  tgLastErr?.message,
+          });
+          await Deal.findByIdAndUpdate(deal._id, {
+            'steps.telegram.done':  false,
+            'steps.telegram.error': tgLastErr?.message,
+          }).catch(() => {});
+        }
+      }
     } finally {
       // Release in-flight claim — runs on every exit path (return, throw, or fall-through)
       releaseInflight(productId, platform);

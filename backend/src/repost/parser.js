@@ -125,13 +125,25 @@ async function downloadMedia(client, message) {
   }
 }
 
+function extractTelegramText(event) {
+  return (
+    event?.message?.message ||
+    event?.message?.text ||
+    event?.message?.caption ||
+    event?.originalUpdate?.message?.message ||
+    event?.originalUpdate?.message?.text ||
+    event?.update?.message ||
+    ''
+  );
+}
+
 // ── Main parser ───────────────────────────────────────────────────────────────
 
 async function parseMessage(event, client) {
-  const message = event.message;
+  const message = event.message || event.originalUpdate?.message || event.update;
   if (!message) return null;
 
-  const rawText  = message.message || '';
+  const rawText  = extractTelegramText(event);
   const textUrls = extractTextUrls(rawText);
   const btnUrls  = extractButtonUrls(message);
   const allUrls  = [...new Set([...textUrls, ...btnUrls])];
@@ -176,4 +188,4 @@ async function parseMessage(event, client) {
   };
 }
 
-module.exports = { parseMessage };
+module.exports = { parseMessage, extractTelegramText };

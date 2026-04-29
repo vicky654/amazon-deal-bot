@@ -1,41 +1,41 @@
 require('dotenv').config();
 
-const express  = require('express');
-const cors     = require('cors');
+const express = require('express');
+const cors = require('cors');
 const mongoose = require('mongoose');
-const cron     = require('node-cron');
-const path     = require('path');
+const cron = require('node-cron');
+const path = require('path');
 
 // ── New multi-platform modules ────────────────────────────────────────────────
-const newCrawler          = require('./src/crawler');
-const dealsRouter         = require('./src/routes/deals');
-const crawlerRouter       = require('./src/routes/crawler');
-const eventsRouter        = require('./src/routes/events');
-const healthRouter        = require('./src/routes/health');
-const earnkaroRouter      = require('./src/routes/earnkaro');
-const reelsRouter         = require('./src/routes/reels');
-const systemRouter        = require('./src/routes/system');
-const debugRouter         = require('./src/routes/debug');
-const repostDebugRouter   = require('./src/routes/repost');
-const redirectRouter      = require('./src/routes/redirect');
-const authRouter          = require('./src/routes/auth');
-const dashboardRouter     = require('./src/routes/dashboard');
-const verifyToken         = require('./src/middleware/auth');
+const newCrawler = require('./src/crawler');
+const dealsRouter = require('./src/routes/deals');
+const crawlerRouter = require('./src/routes/crawler');
+const eventsRouter = require('./src/routes/events');
+const healthRouter = require('./src/routes/health');
+const earnkaroRouter = require('./src/routes/earnkaro');
+const reelsRouter = require('./src/routes/reels');
+const systemRouter = require('./src/routes/system');
+const debugRouter = require('./src/routes/debug');
+const repostDebugRouter = require('./src/routes/repost');
+const redirectRouter = require('./src/routes/redirect');
+const authRouter = require('./src/routes/auth');
+const dashboardRouter = require('./src/routes/dashboard');
+const verifyToken = require('./src/middleware/auth');
 const { getBrowser, closeBrowser, clearChromeLocks, killLingeringChrome, CHROME_PROFILE_DIR } = require('./src/scraper/browser');
-const { getQueueStats }   = require('./src/queue');
+const { getQueueStats } = require('./src/queue');
 const earnkaroAutoRefresh = require('./src/services/earnkaroAutoRefresh');
 const { state: cronState, addLog: cronLog, parseIntervalMinutes } = require('./src/cronState');
 
 // ── Legacy modules (kept for backward compat during migration) ─────────────
 const telegram = require('./telegram');
-const logger   = require('./utils/logger');
+const logger = require('./utils/logger');
 
 /*
  * ─── ENVIRONMENT ──────────────────────────────────────────────────────────────
  */
 
 const REQUIRED_ENV = ['MONGODB_URI', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT'];
-const missingEnv   = REQUIRED_ENV.filter((k) => !process.env[k]);
+const missingEnv = REQUIRED_ENV.filter((k) => !process.env[k]);
 if (missingEnv.length) {
   logger.warn(`Missing env vars: ${missingEnv.join(', ')} — some features disabled`);
 }
@@ -75,9 +75,9 @@ if (missingEnv.length) {
   }
 }
 
-const PORT          = process.env.PORT          || 5000;
-const MONGODB_URI   = process.env.MONGODB_URI   || 'mongodb://localhost:27017/deal-system';
-const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/15 * * * *'; // every 15 min
+const PORT = process.env.PORT || 5000;
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/deal-system';
+const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/5 * * * *'; // every 15 min
 
 /*
  * ─── APP ──────────────────────────────────────────────────────────────────────
@@ -119,22 +119,22 @@ function originAllowed(origin, allowList) {
 
 const corsOptions = rawOrigins
   ? {
-      origin(origin, callback) {
-        const list = rawOrigins.split(',').map((o) => o.trim()).filter(Boolean);
-        if (originAllowed(origin, list)) return callback(null, true);
-        logger.warn(`[CORS] Blocked origin: ${origin}`);
-        callback(new Error(`CORS: origin "${origin}" not allowed`));
-      },
-      credentials:    true,
-      methods:        CORS_METHODS,
-      allowedHeaders: CORS_HEADERS,
-    }
+    origin(origin, callback) {
+      const list = rawOrigins.split(',').map((o) => o.trim()).filter(Boolean);
+      if (originAllowed(origin, list)) return callback(null, true);
+      logger.warn(`[CORS] Blocked origin: ${origin}`);
+      callback(new Error(`CORS: origin "${origin}" not allowed`));
+    },
+    credentials: true,
+    methods: CORS_METHODS,
+    allowedHeaders: CORS_HEADERS,
+  }
   : {
-      // Open CORS for local dev — credentials must be false with origin: '*'
-      origin:         '*',
-      methods:        CORS_METHODS,
-      allowedHeaders: CORS_HEADERS,
-    };
+    // Open CORS for local dev — credentials must be false with origin: '*'
+    origin: '*',
+    methods: CORS_METHODS,
+    allowedHeaders: CORS_HEADERS,
+  };
 
 // Handle preflight (OPTIONS) for ALL routes before any other middleware.
 // This is required for non-simple requests (e.g. those with Authorization header).
@@ -171,7 +171,7 @@ mongoose
       const autoMode = require('./src/autoMode');
       await autoMode.loadState();
       logger.info(`[Boot] Auto mode: ${autoMode.state.enabled ? 'ON' : 'OFF'}`);
-    } catch (_) {}
+    } catch (_) { }
   })
   .catch((err) => logger.error(`MongoDB connection error: ${err.message}`));
 
@@ -212,18 +212,18 @@ cron.schedule(CRON_SCHEDULE, async () => {
  */
 
 // Multi-platform REST API
-app.use('/r',             redirectRouter);     // click tracking redirects
-app.use('/api/auth',      authRouter);         // login + token verify
+app.use('/r', redirectRouter);     // click tracking redirects
+app.use('/api/auth', authRouter);         // login + token verify
 app.use('/api/dashboard', verifyToken, dashboardRouter); // protected dashboard
-app.use('/api/events',   eventsRouter);
-app.use('/api/deals',    dealsRouter);
-app.use('/api/crawler',  crawlerRouter);
+app.use('/api/events', eventsRouter);
+app.use('/api/deals', dealsRouter);
+app.use('/api/crawler', crawlerRouter);
 app.use('/api/earnkaro', earnkaroRouter);
-app.use('/api/reels',    reelsRouter);
-app.use('/api/system',   systemRouter);
-app.use('/api/debug',    debugRouter);
+app.use('/api/reels', reelsRouter);
+app.use('/api/system', systemRouter);
+app.use('/api/debug', debugRouter);
 app.use('/api/debug/repost', repostDebugRouter);
-app.use('/',             healthRouter);
+app.use('/', healthRouter);
 
 // ── Legacy endpoints (frontend currently calls these) ─────────────────────────
 
@@ -236,16 +236,16 @@ app.post('/generate', async (req, res, next) => {
 // POST /api/test-deal — bypass scraper, send dummy deal directly to Telegram
 // If this works → scraper is broken. If this fails → Telegram config is broken.
 app.post('/api/test-deal', async (req, res) => {
-  const TOKEN   = process.env.TELEGRAM_TOKEN;
+  const TOKEN = process.env.TELEGRAM_TOKEN;
   const CHAT_ID = process.env.TELEGRAM_CHAT;
 
   logger.info(`[TestDeal] TOKEN=${TOKEN ? TOKEN.slice(0, 8) + '…' : 'NOT SET'} CHAT_ID=${CHAT_ID || 'NOT SET'}`);
 
   if (!TOKEN || !CHAT_ID) {
     return res.status(500).json({
-      ok:      false,
-      error:   'Telegram not configured',
-      TOKEN:   TOKEN ? `${TOKEN.slice(0, 8)}…` : 'NOT SET',
+      ok: false,
+      error: 'Telegram not configured',
+      TOKEN: TOKEN ? `${TOKEN.slice(0, 8)}…` : 'NOT SET',
       CHAT_ID: CHAT_ID || 'NOT SET',
     });
   }
@@ -277,7 +277,7 @@ app.post('/telegram', async (req, res) => {
     if (!title || !link) return res.status(400).json({ error: 'title and link are required' });
 
     const caption = telegram.formatDealText(title, price, link, originalPrice, savings, null, platform);
-    const result  = await telegram.sendToTelegram(image, caption, link);
+    const result = await telegram.sendToTelegram(image, caption, link);
     res.json({ success: true, result });
   } catch (err) {
     logger.error(`/telegram: ${err.message}`);
@@ -304,7 +304,7 @@ app.get('/api/crawler/status', async (req, res) => {
     const CrawlerRun = require('./src/models/CrawlerRun');
     const runs = await CrawlerRun.find().sort({ startedAt: -1 }).limit(10).lean();
     res.json({
-      isRunning:  cronState.running,
+      isRunning: cronState.running,
       queueStats: getQueueStats(),
       recentRuns: runs,
     });
@@ -334,7 +334,7 @@ async function shutdown(signal) {
       const repost = require('./src/repost');
       await repost.stop();
       logger.info('[Server] Repost engine stopped');
-    } catch (_) {}
+    } catch (_) { }
   }
   // Close browser first — this flushes the profile to disk cleanly and prevents
   // SingletonLock files from persisting after restart.
@@ -354,7 +354,7 @@ async function shutdown(signal) {
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT',  () => shutdown('SIGINT'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 /*
  * ─── START ────────────────────────────────────────────────────────────────────
@@ -366,7 +366,7 @@ if (require.main === module) {
     logger.info(`Server running on port ${PORT}`);
     logger.info(`Cron: ${CRON_SCHEDULE} (interval ~${parseIntervalMinutes(CRON_SCHEDULE)} min)`);
     logger.info(`CORS: ${rawOrigins ? `restricted to ${rawOrigins}` : 'open (*)'}`);
-    telegram.sendTestMessage().catch(() => {});
+    telegram.sendTestMessage().catch(() => { });
 
     // ── Browser self-test ──────────────────────────────────────────────────
     // Runs at startup to catch profile lock / binary issues immediately,
@@ -378,7 +378,7 @@ if (require.main === module) {
       clearChromeLocks(CHROME_PROFILE_DIR);
 
       const testBrowser = await getBrowser();
-      const testPage    = await testBrowser.newPage();
+      const testPage = await testBrowser.newPage();
       await testPage.goto('about:blank', { timeout: 10000 });
       await testPage.close();
       // Browser stays alive — reused by the crawler on every cron tick.
@@ -395,7 +395,8 @@ if (require.main === module) {
       logger.error('[Boot]   4. If all else fails, delete chrome-profile/ and restart');
       // Do not process.exit() — keep the server up so /api/debug/crawler is reachable
     }
-    // ── Telegram repost engine ─────────────────────────────────────────────
+    // ── Telegram repost engine (DISABLED) ──────────────────────────────────
+    /*
     if (process.env.REPOST_ENABLED === 'true') {
       try {
         const repost = require('./src/repost');
@@ -405,6 +406,7 @@ if (require.main === module) {
         // Non-fatal — server stays up, scraper continues working
       }
     }
+    */
 
     // EarnKaro auto-refresh disabled — scraper is Amazon-only (no EarnKaro needed)
     // earnkaroAutoRefresh.start();
@@ -415,11 +417,11 @@ if (require.main === module) {
     const SELF_URL = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || '').replace(/\/$/, '');
     if (SELF_URL && process.env.NODE_ENV === 'production') {
       const https = require('https');
-      const http  = require('http');
+      const http = require('http');
       setInterval(() => {
-        const url  = `${SELF_URL}/health`;
-        const lib  = url.startsWith('https') ? https : http;
-        const req  = lib.get(url, (res) => {
+        const url = `${SELF_URL}/health`;
+        const lib = url.startsWith('https') ? https : http;
+        const req = lib.get(url, (res) => {
           res.statusCode === 200
             ? logger.debug('[KeepAlive] Self ping OK')
             : logger.warn(`[KeepAlive] Self ping → ${res.statusCode}`);

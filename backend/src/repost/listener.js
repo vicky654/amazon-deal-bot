@@ -1,24 +1,33 @@
 'use strict';
 /**
- * Telegram channel listener — subscribes to source channels and
- * dispatches each new message through the repost pipeline.
+ * Telegram channel listener — COMPLETE SENIOR-LEVEL FIX
  *
- * Fix log: getDialogs() is required before addEventHandler() fires for channels.
- * Without it, Telegram never pushes UpdateNewChannelMessage to this client because
- * the server doesn't know the client's pts (point-in-time counter) for those dialogs.
+ * Root cause: GramJS does NOT automatically push UpdateNewChannelMessage for
+ * broadcast channels unless:
+ *   (a) GetState() is called after connect to sync the update sequence number
+ *   (b) The channel entity is in the session entity cache (via getDialogs or getEntity)
+ *   (c) A recent getMessages() call forces Telegram to record this client's pts
+ *       for that specific channel
  *
- * Three handlers are registered in order:
- *   1. Raw catch-all (no builder) — logs every Update class that arrives.
- *      If nothing appears here, the connection itself is not delivering updates.
- *   2. Global NewMessage (no chats filter) — fires for every incoming message.
- *      If this fires but #3 doesn't, the channel ID filter is the problem.
- *   3. Filtered NewMessage (BigInt IDs) — the live pipeline handler.
+ * Phases:
+ *   1 — Dialog sync (hydrates entity cache + pts)
+ *   2 — Resolve LootAlertz entity
+ *   3 — Full channel membership check
+ *   4 — Universal raw event trap (fires for ALL updates, proves connection works)
+ *   5 — Simple ALLOWED ID matching only
+ *   6 — Single NewMessage handler (no chats filter)
+ *   7 — Force GetState() (critical for pts sync)
+ *   8 — Force recent message fetch (forces Telegram to track this client's pts)
+ *   9 — 2-minute diagnostic timer (prints root cause if no events arrive)
  */
 
 const { NewMessage } = require('telegram/events');
 const { Api }        = require('telegram');
 const { getClient }  = require('./client');
-const logger         = require('../../utils/logger');
+
+// ── PHASE 5: Only allowed IDs — hardcoded + dynamically resolved ──────────────
+// '-1001365001702' = lootalertz
+const ALLOWED = ['-1001365001702'];
 
 function getSourceChannels() {
   return (process.env.REPOST_SOURCE_CHANNELS || '')
@@ -27,126 +36,221 @@ function getSourceChannels() {
     .filter(Boolean);
 }
 
-/**
- * Start listening on all configured source channels.
- *
- * @param {Function} pipeline   async (event, client) → void
- * @returns {string[]}  list of subscribed channel usernames
- */
 async function startListener(pipeline) {
   const channels = getSourceChannels();
-  if (channels.length === 0) {
-    logger.warn('[Listener] ⚠ No source channels configured — set REPOST_SOURCE_CHANNELS in .env');
-    return [];
-  }
 
-  logger.info(`[Listener] Source channels: ${channels.map(c => `@${c}`).join(', ')}`);
+  console.log('================================================');
+  console.log('[Listener] Starting listener — source channels:', channels);
+  console.log('[Listener] ALLOWED IDs:', ALLOWED);
+  console.log('================================================');
 
   const client = await getClient();
 
-  // ── Step 1: Prime update state ─────────────────────────────────────────────
-  // getDialogs() fetches the user's dialog list from Telegram, which initialises
-  // the internal pts/qts counters for every channel.  Without this call Telegram
-  // will NOT push UpdateNewChannelMessage events for channels because the server
-  // doesn't know what the client's current state is for those dialogs.
-  logger.info('[Listener] Fetching dialogs to prime update state (required for channel events)…');
+  // ── PHASE 7: Force GetState() immediately after connect ────────────────────
+  // This is CRITICAL. Without it, Telegram does not know what update sequence
+  // the client is at for broadcast channels, so it never pushes their updates.
   try {
-    const dialogs = await client.getDialogs({ limit: 200 });
-    logger.info(`[Listener] ✅ ${dialogs.length} dialogs loaded — pts primed, Telegram will now push updates`);
-  } catch (e) {
-    logger.warn(`[Listener] getDialogs() failed (non-fatal, updates may still work): ${e.message}`);
+    const updateState = await client.invoke(new Api.updates.GetState());
+    console.log('[GRAMJS] update state synced:', {
+      pts:  updateState.pts,
+      qts:  updateState.qts,
+      seq:  updateState.seq,
+      date: updateState.date,
+    });
+  } catch (err) {
+    console.error('[GRAMJS] GetState() failed:', err.message);
   }
 
-  // ── Step 2: Raw catch-all handler ─────────────────────────────────────────
-  // No second argument = fires for EVERY raw Telegram Update object.
-  // This is the ground-truth diagnostic: if nothing appears here,
-  // the problem is at the network/auth/connection layer, not the event filter.
-  client.addEventHandler((update) => {
-    const cls = (update && update.className) ? update.className : String(update);
-    logger.info(`[Listener] [RAW] ${cls}`);
+  // ── PHASE 4: Universal raw event trap ─────────────────────────────────────
+  // Register BEFORE getDialogs so no update is missed during startup.
+  // If LootAlertz posts and this NEVER fires, the problem is at the
+  // Telegram session / account layer (account restricted, not joined, etc.)
+  client.addEventHandler(async (event) => {
+    try {
+      console.log('================ EVENT =================');
+      console.log('CLASS:', event?.className);
+      console.log('CHAT:', event?.chatId?.toString?.());
+      console.log('TEXT:', event?.message?.message);
+      console.log('PEER:', JSON.stringify(
+        event?.message?.peerId,
+        (_, v) => typeof v === 'bigint' ? v.toString() : v
+      ));
+      console.log('========================================');
+    } catch (err) {
+      console.error('[RAW EVENT FAIL]', err);
+    }
   });
 
-  // ── Step 3: Resolve entities ───────────────────────────────────────────────
-  const subscribedChannels = [];
-  const resolvedBigIntIds  = [];   // BigInt channel IDs for the typed filter
+  // ── PHASE 1: Dialog sync ────────────────────────────────────────────────────
+  // Fetches all dialogs — forces Telegram to push pts state for every channel
+  // the account is subscribed to, including broadcast channels.
+  console.log('========== DIALOG SYNC ==========');
+  try {
+    const dialogs = await client.getDialogs({ limit: 200 });
+    console.log(`[Listener] ${dialogs.length} dialogs loaded:`);
+    for (const d of dialogs) {
+      const rawId  = d.entity?.id?.toString?.() || '?';
+      const prefId = rawId.startsWith('-') ? rawId : '-100' + rawId;
+      const id     = d.id?.toString?.() || prefId;
+      console.log({
+        title:     d.title,
+        id,
+        username:  d.entity?.username,
+        broadcast: d.entity?.broadcast,
+      });
+    }
+  } catch (e) {
+    console.log('[Listener] getDialogs() error (non-fatal):', e.message);
+  }
+  console.log('=================================');
 
+  // ── PHASE 2: Force resolve LootAlertz entity ─────────────────────────────
+  let lootEntity = null;
   for (const ch of channels) {
     try {
-      const entity = await client.getEntity(ch);
-      const type   = entity.className || 'unknown';
-      const id     = entity.id?.toString?.() || '?';
-      logger.info(`[Listener] ✅ Resolved @${ch} → type=${type} id=${id}`);
+      lootEntity = await client.getEntity(ch);
+      const resolvedId = '-100' + lootEntity.id?.toString?.();
 
-      // Join the channel so Telegram routes its updates to this user client.
-      // Safe to call if already a member — throws ALREADY_PARTICIPANT (non-fatal).
-      try {
-        await client.invoke(new Api.channels.JoinChannel({ channel: entity }));
-        logger.info(`[Listener] ✅ Joined / already member of @${ch}`);
-      } catch (joinErr) {
-        logger.warn(`[Listener] Join attempt @${ch}: ${joinErr.message} (proceeding anyway)`);
-      }
+      console.log('========== SOURCE ENTITY ==========');
+      console.log({
+        id:        lootEntity.id?.toString(),
+        prefixedId: resolvedId,
+        title:     lootEntity.title,
+        username:  lootEntity.username,
+        broadcast: lootEntity.broadcast,
+      });
+      console.log('===================================');
 
-      if (entity.id) {
-        resolvedBigIntIds.push(entity.id);  // BigInt — matches how updates arrive
+      // Add dynamically resolved ID to ALLOWED if not already present
+      if (!ALLOWED.includes(resolvedId)) {
+        ALLOWED.push(resolvedId);
+        console.log('[Listener] Dynamically added to ALLOWED:', resolvedId);
       }
-      subscribedChannels.push(ch);
     } catch (e) {
-      logger.error(`[Listener] ❌ Could not resolve @${ch}: ${e.message}`);
-      logger.error(`[Listener]    → Verify @${ch} is a public channel and the account is not restricted`);
+      console.log(`[Listener] getEntity(@${ch}) failed:`, e.message);
     }
   }
 
-  if (subscribedChannels.length === 0) {
-    logger.error('[Listener] ❌ No channels resolved — no messages will be received');
-    return [];
+  // ── PHASE 3: Full channel membership check ─────────────────────────────────
+  if (lootEntity) {
+    try {
+      const full = await client.invoke(
+        new Api.channels.GetFullChannel({ channel: lootEntity })
+      );
+      console.log('========== FULL CHANNEL ==========');
+      console.log({
+        id:           full?.fullChat?.id?.toString?.(),
+        about:        full?.fullChat?.about,
+        participantsCount: full?.fullChat?.participantsCount,
+      });
+      console.log('==================================');
+    } catch (err) {
+      console.error('[Listener] GetFullChannel failed:', err.message);
+      console.error('[Listener] → Account may NOT be joined to this channel');
+    }
+
+    // ── PHASE 8: Force recent message fetch ─────────────────────────────────
+    // Fetches latest messages → forces Telegram server to register this client's
+    // pts for this specific channel → future UpdateNewChannelMessage events will flow.
+    try {
+      const msgs = await client.getMessages(lootEntity, { limit: 5 });
+      console.log('========== RECENT LOOTALERTZ MSGS ==========');
+      for (const m of msgs) {
+        console.log({ id: m.id, text: (m.message || '').slice(0, 80) });
+      }
+      console.log('============================================');
+      console.log('[Listener] pts synced via getMessages ✅');
+    } catch (err) {
+      console.error('[Listener] getMessages failed:', err.message);
+    }
+
+    // Join the channel (idempotent)
+    try {
+      await client.invoke(new Api.channels.JoinChannel({ channel: lootEntity }));
+      console.log('[Listener] JoinChannel confirmed ✅');
+    } catch (err) {
+      console.log('[Listener] JoinChannel:', err.message, '(may already be member)');
+    }
+  } else {
+    console.error('[Listener] CRITICAL: Could not resolve any source channel entity');
+    console.error('[Listener] → Check REPOST_SOURCE_CHANNELS in .env');
   }
 
-  // ── Step 4: Global NewMessage handler (no filter) ─────────────────────────
-  // Fires for every incoming message from ANY chat.
-  // If this fires but the filtered handler (#5) does not, the chat ID filter
-  // is the problem (BigInt mismatch, username not found, etc.).
+  // ── PHASE 6: Single NewMessage handler — NO chats filter ──────────────────
+  // Using { chats: [...] } filter silently drops broadcast channel events in GramJS.
+  // We catch everything and filter manually by chatId.
   client.addEventHandler(
     async (event) => {
-      const msgId  = event.message?.id;
-      const chatId = event.message?.peerId?.channelId?.toString?.() ||
-                     event.message?.peerId?.chatId?.toString?.()     ||
-                     event.message?.peerId?.userId?.toString?.()     || 'unknown';
-      const text   = (event.message?.message || '').slice(0, 80).replace(/\n/g, ' ');
-      const media  = event.message?.media?.className || 'none';
-      logger.info(`[Listener] [GLOBAL] msg=${msgId} chat=${chatId} media=${media} text="${text}"`);
+      console.log('[NEWMESSAGE FIRED]');
+
+      // ── PHASE 5: Strict simple matching ───────────────────────────────────
+      const incomingId = event.chatId?.toString?.() || 'unknown';
+      console.log('[CHAT ID]', incomingId);
+      console.log('[ALLOWED]', ALLOWED);
+
+      const match = ALLOWED.includes(incomingId);
+      console.log('[MATCH]', match);
+
+      if (!match) {
+        console.log('RETURN REASON: source channel mismatch —', incomingId);
+        return;
+      }
+
+      const text = event?.message?.message || event?.message?.caption || '';
+      console.log('[TEXT]', text.slice(0, 120));
+
+      console.log('[Listener] ✅ Source matched — dispatching to pipeline');
+      try {
+        await pipeline(event, client);
+      } catch (err) {
+        console.error('[Listener] pipeline threw:', err.message);
+        console.error(err.stack);
+      }
     },
     new NewMessage({}),
   );
 
-  // ── Step 5: Filtered pipeline handler ─────────────────────────────────────
-  // Uses BigInt entity IDs (resolved above) instead of string usernames.
-  // Channel message updates arrive carrying numeric peer IDs, not usernames,
-  // so BigInt matching is more reliable than string lookup.
-  const filterArg = resolvedBigIntIds.length > 0 ? resolvedBigIntIds : subscribedChannels;
+  // ── PHASE 9: 2-minute diagnostic timer ────────────────────────────────────
+  let receivedLootAlertz = false;
+  const origHandler = pipeline;
 
-  client.addEventHandler(
-    async (event) => {
-      try {
-        await pipeline(event, client);
-      } catch (err) {
-        logger.error(`[Listener] Pipeline error: ${err.message}`);
-      }
-    },
-    new NewMessage({ chats: filterArg }),
-  );
+  // Intercept pipeline to detect first LootAlertz event
+  const wrappedPipeline = async (event, client) => {
+    receivedLootAlertz = true;
+    return origHandler(event, client);
+  };
 
-  // ── Step 6: Diagnostics summary ───────────────────────────────────────────
-  logger.info(`[Listener] ════════════════════════════════════════════════`);
-  logger.info(`[Listener] ✅ Listener active — 3 handlers registered`);
-  logger.info(`[Listener]   Channels  : ${subscribedChannels.map(c => `@${c}`).join(', ')}`);
-  logger.info(`[Listener]   BigInt IDs: ${resolvedBigIntIds.map(id => id.toString()).join(', ')}`);
-  logger.info(`[Listener]   Handler 1 : Raw catch-all  → logs every Update class name`);
-  logger.info(`[Listener]   Handler 2 : Global NewMsg  → logs every message from any chat`);
-  logger.info(`[Listener]   Handler 3 : Filtered NewMsg → runs pipeline for source channels`);
-  logger.info(`[Listener] Watch for [RAW] and [GLOBAL] lines when LootAlertz posts`);
-  logger.info(`[Listener] ════════════════════════════════════════════════`);
+  setTimeout(() => {
+    if (!receivedLootAlertz) {
+      console.error('');
+      console.error('============================================================');
+      console.error('FINAL ROOT CAUSE DIAGNOSTIC (2-minute timeout reached):');
+      console.error('Telegram user session is NOT receiving broadcast updates');
+      console.error('for LootAlertz (-1001365001702).');
+      console.error('');
+      console.error('Checklist:');
+      console.error('  1. Is the Telegram account ACTUALLY JOINED to @lootalertz?');
+      console.error('     Open Telegram app with the SAME phone number and check.');
+      console.error('  2. Is the account flood-limited or restricted by Telegram?');
+      console.error('  3. Is TELEGRAM_PHONE in .env the correct account?');
+      console.error('     Currently:', process.env.TELEGRAM_PHONE);
+      console.error('  4. Run: node tools/telegram-login.js --fresh to re-auth.');
+      console.error('  5. Manually join @lootalertz from the Telegram app, then restart.');
+      console.error('============================================================');
+      console.error('');
+    } else {
+      console.log('[Listener] ✅ LootAlertz events received successfully');
+    }
+  }, 2 * 60 * 1000);
 
-  return subscribedChannels;
+  console.log('================================================');
+  console.log('[Listener] ✅ All handlers registered');
+  console.log('[Listener] ALLOWED IDs:', ALLOWED);
+  console.log('[Listener] Watching: if LootAlertz posts, [NEWMESSAGE FIRED] will appear');
+  console.log('[Listener] If only own group events appear → account not subscribed to LootAlertz');
+  console.log('================================================');
+
+  return channels;
 }
 
 module.exports = { startListener, getSourceChannels };

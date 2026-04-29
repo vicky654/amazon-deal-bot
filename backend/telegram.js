@@ -7,7 +7,7 @@ const logger = require('./utils/logger');
  */
 
 const TOKEN   = process.env.TELEGRAM_TOKEN;
-const CHAT_ID = process.env.TELEGRAM_CHAT;
+const CHAT_ID = process.env.REPOST_OUTPUT_CHANNEL || process.env.TELEGRAM_CHAT || '-1003897819335';
 
 let bot = null;
 
@@ -75,31 +75,31 @@ const MAX_TITLE_IN_CAPTION  = 180;   // leave room for price lines + links
 function formatDealText(title, price, link, originalPrice, discount, platformEmoji, platform = 'amazon') {
   const meta = PLATFORM_META[platform] || PLATFORM_META.manual;
 
-  let savingsPct = discount;
-  if (!savingsPct && originalPrice && price && originalPrice > price) {
-    savingsPct = Math.round(((originalPrice - price) / originalPrice) * 100);
-  }
+  // 1. Calculations
+  const mrp          = originalPrice ? Number(originalPrice) : 0;
+  const dealPrice    = price ? Number(price) : 0;
+  const savings      = mrp > dealPrice ? mrp - dealPrice : 0;
+  const discountPct  = discount ? Number(discount) : (mrp > 0 ? Math.round((savings / mrp) * 100) : 0);
 
-  const savedAmount = (originalPrice && price)
-    ? Math.round(originalPrice - price).toLocaleString('en-IN')
-    : null;
+  // 2. Debug Log
+  console.log(`\n[MessageFormat]\nMRP=${mrp}\nDeal=${dealPrice}\nSavings=${savings}\nDiscount=${discountPct}\n`);
 
-  const formattedPrice    = price         ? `₹${Number(price).toLocaleString('en-IN')}`         : 'Check Price';
-  const formattedOriginal = originalPrice ? `₹${Number(originalPrice).toLocaleString('en-IN')}` : null;
+  // 3. Currency Formatting (en-IN)
+  const fmt = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
+  const formattedMrp     = fmt.format(mrp);
+  const formattedDeal    = fmt.format(dealPrice);
+  const formattedSavings = fmt.format(savings);
 
-  const header = savingsPct
-    ? `🔥 <b>${savingsPct}% OFF</b> — ${meta.label} Deal`
+  // 4. Header with Discount %
+  const header = discountPct > 0 
+    ? `🔥 <b>${discountPct}% OFF</b> — ${meta.label} Deal`
     : `🔥 ${meta.label} Deal`;
 
-  // Truncate title so the overall caption stays under Telegram's sendPhoto limit.
-  // Long titles are the #1 cause of "caption is too long" → sendPhoto failure.
+  // 5. Build Lines
   const rawTitle    = (title || '').trim();
   const shortTitle  = rawTitle.length > MAX_TITLE_IN_CAPTION
     ? rawTitle.slice(0, MAX_TITLE_IN_CAPTION - 1) + '…'
     : rawTitle;
-
-  // Encode & in URLs to prevent Telegram HTML parser errors ("can't parse entities")
-  const safeLink = encodeHrefAmpersands(link || '');
 
   const lines = [
     header,
@@ -108,16 +108,20 @@ function formatDealText(title, price, link, originalPrice, discount, platformEmo
     '',
   ];
 
-  if (formattedOriginal) lines.push(`🏷 MRP: <s>${formattedOriginal}</s>`);
-  lines.push(`💰 Deal Price: <b>${formattedPrice}</b>`);
-
-  if (savingsPct) {
-    lines.push(
-      savedAmount
-        ? `⚡ You Save: <b>${savingsPct}% (₹${savedAmount})</b>`
-        : `⚡ You Save: <b>${savingsPct}%</b>`
-    );
+  // Rule: Hide MRP line if originalPrice <= dealPrice
+  if (mrp > dealPrice) {
+    lines.push(`🏷 MRP: <s>₹${formattedMrp}</s>`);
   }
+
+  lines.push(`💰 Deal Price: <b>₹${formattedDeal}</b>`);
+
+  // Rule: Hide savings line if savings <= 0
+  if (savings > 0) {
+    lines.push(`⚡ You Save: <b>${discountPct}% (₹${formattedSavings})</b>`);
+  }
+
+  // Encode & in URLs to prevent Telegram HTML parser errors
+  const safeLink = encodeHrefAmpersands(link || '');
 
   lines.push('');
   lines.push(`${meta.emoji} <a href="${safeLink}">Buy Now on ${meta.label}</a>`);
@@ -195,35 +199,72 @@ function _retryAfterMs(err) {
  * Called only through the rate-limited wrapper below.
  */
 async function _sendCore(imageUrl, caption, buyLink) {
+  // ── STEP 3: Destination check ────────────────────────────────────────────
+  console.log('[DESTINATION CHECK]');
+  console.log('ENV TELEGRAM_CHAT:', process.env.TELEGRAM_CHAT);
+  console.log('ENV REPOST_OUTPUT_CHANNEL:', process.env.REPOST_OUTPUT_CHANNEL);
+  console.log('FINAL TARGET USED:', CHAT_ID);
+
   if (!bot || !CHAT_ID) {
-    logger.error('[Telegram] ❌ sendToTelegram called but bot/chat not configured — SKIPPING.');
+    console.error('[SEND FAIL] bot or CHAT_ID not configured — TOKEN set:', !!TOKEN, 'CHAT_ID:', CHAT_ID);
     return null;
   }
 
+  // ── STEP 4: Bot account ──────────────────────────────────────────────────
+  try {
+    const me = await bot.getMe();
+    console.log('[BOT ACCOUNT]');
+    console.log({ id: me?.id, username: me?.username, firstName: me?.first_name });
+  } catch (meErr) {
+    console.error('[BOT ACCOUNT] getMe() failed:', meErr.message);
+  }
+
+  // ── STEP 5: Target entity ────────────────────────────────────────────────
+  try {
+    const chatInfo = await bot.getChat(CHAT_ID);
+    console.log('[TARGET ENTITY]');
+    console.log({
+      id:        chatInfo?.id,
+      title:     chatInfo?.title,
+      username:  chatInfo?.username,
+      type:      chatInfo?.type,
+    });
+  } catch (chatErr) {
+    console.error('[TARGET ENTITY] getChat() failed:', chatErr.message);
+  }
+
   const validImage = isValidImageUrl(imageUrl);
-  logger.info(`[Telegram] Sending deal — chat=${CHAT_ID} hasImage=${validImage} captionLen=${caption?.length ?? 0}`);
+  console.log('[SEND] imageUrl valid:', validImage, '| captionLen:', caption?.length ?? 0);
 
   const replyMarkup = buyLink
     ? { inline_keyboard: [[{ text: '🛒 Buy Now', url: encodeHrefAmpersands(buyLink) }]] }
     : undefined;
 
-  // ── Attempt 1: sendPhoto with caption (requires caption ≤ 1024 chars) ────
+  // ── Attempt 1: sendPhoto with caption ────────────────────────────────────
   if (validImage) {
     const photoCaption = caption && caption.length > PHOTO_CAPTION_LIMIT
       ? caption.slice(0, PHOTO_CAPTION_LIMIT - 1) + '…'
       : caption;
 
     try {
+      console.log('[SEND] attempting sendPhoto to', CHAT_ID);
       const result = await bot.sendPhoto(CHAT_ID, imageUrl, {
         caption:      photoCaption,
         parse_mode:   'HTML',
         reply_markup: replyMarkup,
       });
-      logger.info('[Telegram] Deal sent with image');
+      console.log('\n========== TELEGRAM SEND RESPONSE ==========');
+      console.log({ messageId: result?.message_id, date: result?.date, chatId: result?.chat?.id, chatType: result?.chat?.type });
+      console.log('TARGET CHAT:', CHAT_ID);
+      console.log('============================================\n');
       return result;
     } catch (photoErr) {
       const errBody = photoErr.response?.body ?? photoErr.response ?? '';
-      logger.warn(`[Telegram] sendPhoto failed (${photoErr.message}) body=${JSON.stringify(errBody)} — falling back to text`);
+      console.error('\n========== TELEGRAM SEND FAIL ==========');
+      console.error(photoErr);
+      console.error('body:', JSON.stringify(errBody));
+      console.error('========================================\n');
+      console.log('[SEND] sendPhoto failed — falling back to text');
     }
   }
 
@@ -233,16 +274,24 @@ async function _sendCore(imageUrl, caption, buyLink) {
     : caption;
 
   try {
+    console.log('[SEND] attempting sendMessage to', CHAT_ID);
     const result = await bot.sendMessage(CHAT_ID, textCaption, {
       parse_mode:               'HTML',
       reply_markup:             replyMarkup,
       disable_web_page_preview: false,
     });
-    logger.info('[Telegram] Deal sent (text-only)');
+    console.log('\n========== TELEGRAM SEND RESPONSE ==========');
+    console.log({ messageId: result?.message_id, date: result?.date, chatId: result?.chat?.id, chatType: result?.chat?.type });
+    console.log('TARGET CHAT:', CHAT_ID);
+    console.log('============================================\n');
     return result;
   } catch (textErr) {
     const errBody = textErr.response?.body ?? textErr.response ?? '';
-    logger.error(`[Telegram] sendMessage FAILED: ${textErr.message} | body=${JSON.stringify(errBody)} | captionLen=${textCaption?.length}`);
+    console.error('\n========== TELEGRAM SEND FAIL ==========');
+    console.error(textErr);
+    console.error('body:', JSON.stringify(errBody));
+    console.error('captionLen:', textCaption?.length);
+    console.error('========================================\n');
     throw textErr;
   }
 }

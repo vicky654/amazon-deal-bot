@@ -1,16 +1,12 @@
 'use strict';
 /**
  * Deal poster — formats the caption and sends via existing telegram.js pipeline.
- *
- * All sends go through telegram.sendPhotoBuffer or telegram.sendToTelegram.
- * No raw Telegram Bot API calls. No axios. No form-data.
- * Inherits: rate limiter, 429 retry chain, serialized send queue.
+ * FULL DEBUG MODE: destination check, entity resolution, response tracing.
  */
 
 const telegram = require('../../telegram');
-const logger   = require('../../utils/logger');
 
-const DEST_CHANNEL = process.env.TELEGRAM_CHAT || process.env.REPOST_OUTPUT_CHANNEL;
+const DEST_CHANNEL = process.env.REPOST_OUTPUT_CHANNEL || process.env.TELEGRAM_CHAT;
 
 // ── Message formatter ─────────────────────────────────────────────────────────
 
@@ -48,25 +44,47 @@ async function repostDeal(deal) {
   const { mediaBuffer, affiliateUrl } = deal;
   const caption = formatRepostCaption(deal);
 
-  logger.info(`[Poster] ─────────────────────────────────────────`);
-  logger.info(`[Poster] 📤 Sending to channel: ${DEST_CHANNEL}`);
-  logger.info(`[Poster] ASIN      : ${deal.asin || 'N/A'}`);
-  logger.info(`[Poster] Title     : "${(deal.title || '').slice(0, 70)}"`);
-  logger.info(`[Poster] Price     : ₹${deal.dealPrice} (orig ₹${deal.originalPrice}) ${deal.discount}% off`);
-  logger.info(`[Poster] MediaBuf  : ${!!mediaBuffer} (${mediaBuffer ? `${Math.round(mediaBuffer.length / 1024)} KB` : 'none'})`);
-  logger.info(`[Poster] URL       : ${(affiliateUrl || '').slice(0, 80)}`);
-  logger.info(`[Poster] Caption   : ${caption.length} chars`);
+  // ── STEP 3: Destination check ─────────────────────────────────────────────
+  console.log('[DESTINATION CHECK]');
+  console.log('ENV TELEGRAM_CHAT:', process.env.TELEGRAM_CHAT);
+  console.log('ENV REPOST_OUTPUT_CHANNEL:', process.env.REPOST_OUTPUT_CHANNEL);
+  console.log('FINAL TARGET USED:', DEST_CHANNEL);
+  console.log('ASIN:', deal.asin);
+  console.log('Title:', (deal.title || '').slice(0, 70));
+  console.log('Price: ₹' + deal.dealPrice, '| Orig: ₹' + deal.originalPrice, '| Disc:', deal.discount + '%');
+  console.log('Has media buffer:', !!mediaBuffer, mediaBuffer ? `(${Math.round(mediaBuffer.length / 1024)} KB)` : '');
+  console.log('Caption length:', caption.length);
+  console.log('URL:', (affiliateUrl || '').slice(0, 80));
 
-  if (mediaBuffer) {
-    logger.info(`[Poster] → Calling telegram.sendPhotoBuffer…`);
-    await telegram.sendPhotoBuffer(mediaBuffer, caption, affiliateUrl);
-    logger.info(`[Poster] ✅ Photo delivered to ${DEST_CHANNEL}`);
-    return;
+  try {
+    let result;
+    if (mediaBuffer) {
+      console.log('[SEND] calling telegram.sendPhotoBuffer...');
+      result = await telegram.sendPhotoBuffer(mediaBuffer, caption, affiliateUrl);
+      console.log('[SEND] sendPhotoBuffer returned:', result?.message_id ? `messageId=${result.message_id}` : 'no messageId');
+    } else {
+      console.log('[SEND] calling telegram.sendToTelegram (no media)...');
+      result = await telegram.sendToTelegram(null, caption, affiliateUrl);
+      console.log('[SEND] sendToTelegram returned:', result?.message_id ? `messageId=${result.message_id}` : 'no messageId');
+    }
+
+    if (result?.message_id) {
+      console.log('\n========== POSTER SEND RESPONSE ==========');
+      console.log({ messageId: result.message_id, chatId: result.chat?.id, chatType: result.chat?.type });
+      console.log('TARGET CHAT:', DEST_CHANNEL);
+      console.log('==========================================\n');
+    } else {
+      console.log('[SEND] WARNING: no message_id in response — message may not have been delivered');
+      console.log('[SEND] full response:', JSON.stringify(result, null, 2));
+    }
+
+    return result;
+  } catch (err) {
+    console.error('\n========== TELEGRAM SEND FAIL ==========');
+    console.error(err);
+    console.error('========================================\n');
+    throw err;
   }
-
-  logger.info(`[Poster] → Calling telegram.sendToTelegram (text/URL image)…`);
-  await telegram.sendToTelegram(null, caption, affiliateUrl);
-  logger.info(`[Poster] ✅ Text delivered to ${DEST_CHANNEL}`);
 }
 
 module.exports = { repostDeal, formatRepostCaption };

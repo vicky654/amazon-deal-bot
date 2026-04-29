@@ -13,7 +13,7 @@
  */
 
 const { startListener }     = require('./listener');
-const { parseMessage }      = require('./parser');
+const { parseMessage, extractTelegramText } = require('./parser');
 const { resolveAmazonLink } = require('./linkResolver');
 const { passesFilter }      = require('./filter');
 const { isAlreadyReposted, markReposted } = require('./dedup');
@@ -56,62 +56,64 @@ let _running       = false;
 let _watchdogTimer = null;
 let _restarting    = false; // guard against concurrent watchdog restarts
 
-// ── Pipeline ──────────────────────────────────────────────────────────────────
+// ── Pipeline (Phases 4–9) ──────────────────────────────────────────────────────
 
 async function pipeline(event, client) {
-  const message = event.message;
-  if (!message) return;
+  console.log('[STEP 1] event received');
 
-  // ── Immediate intake log — fires for EVERY message ────────────────────────
-  const msgId    = message.id;
-  const rawText  = message.message || '';
-  const chatId   = event.message?.peerId?.channelId?.toString?.() || 'unknown';
-  const preview  = rawText.slice(0, 120).replace(/\n/g, ' ');
-
-  stats.totalMessagesReceived++;
-  stats.lastMessageAt = new Date().toISOString();
-
-  logger.info(`[Repost] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-  logger.info(`[Repost] 📨 Message #${msgId} from channel=${chatId}`);
-  logger.info(`[Repost] Text: "${preview}"`);
-
-  // ── Step 1: Parse ─────────────────────────────────────────────────────────
-  const parsed = await parseMessage(event, client);
-  if (!parsed) {
-    logger.info(`[Repost] SKIP msg=${msgId}: parser returned null (empty/non-text message)`);
+  // ── PHASE 5: URL extraction (via parseMessage) ────────────────────────────
+  let parsed;
+  try {
+    parsed = await parseMessage(event, client);
+  } catch (err) {
+    console.error('[PIPELINE FAIL]', err);
     return;
   }
 
-  const platform = _detectPlatform(parsed.allUrls, rawText);
-  logger.info(`[Repost] Platform: ${platform} | URLs: ${parsed.allUrls.length} | Media: ${!!parsed.mediaBuffer}`);
-  if (parsed.allUrls.length > 0) {
-    logger.info(`[Repost] URLs: ${parsed.allUrls.join(', ')}`);
+  if (!parsed) {
+    console.log('RETURN REASON: parseMessage returned null — no message object');
+    return;
   }
-  logger.info(`[Repost] Parsed — title="${(parsed.title || 'null').slice(0, 60)}" price=₹${parsed.dealPrice} disc=${parsed.discount}%`);
 
-  // ── Step 2: Resolve + validate Amazon link ───────────────────────────────
-  // This gate is ALWAYS enforced regardless of TEST_MODE.
-  // TEST_MODE only bypasses quality filters (price/discount thresholds).
-  // A real, validated ASIN is required before any message is posted.
-  const resolved = await resolveAmazonLink(parsed.allUrls);
+  const urls = parsed.allUrls || [];
+  console.log('[URLS]', urls);
+
+  if (urls.length === 0) {
+    console.log('RETURN REASON: no urls extracted');
+    stats.filteredCount++;
+    stats.lastFilterReason = 'no-urls';
+    return;
+  }
+
+  // ── PHASE 6: ASIN resolution ──────────────────────────────────────────────
+  console.log('[ASIN] resolving...');
+  let resolved;
+  try {
+    resolved = await resolveAmazonLink(urls);
+  } catch (err) {
+    console.error('[PIPELINE FAIL]', err);
+    return;
+  }
 
   if (!resolved) {
-    logger.info(`[Repost] SKIP msg=${msgId}: no valid Amazon product link found (platform=${platform})`);
+    console.log('RETURN REASON: asin resolution failed — urls were:', urls);
     stats.filteredCount++;
     stats.lastFilterReason = 'no-valid-amazon-link';
     return;
   }
 
-  // Sanity-check the resolved ASIN format
+  console.log('[ASIN] resolved:', resolved.asin);
+
   if (!/^[A-Z0-9]{10}$/.test(resolved.asin)) {
-    logger.warn(`[Repost] SKIP msg=${msgId}: invalid ASIN format "${resolved.asin}"`);
+    console.log('RETURN REASON: asin resolution failed — bad format:', resolved.asin);
     stats.filteredCount++;
     stats.lastFilterReason = `invalid-asin:${resolved.asin}`;
     return;
   }
 
-  logger.info(`[Repost] ✅ Amazon link validated → ASIN=${resolved.asin} url=${resolved.affiliateUrl}`);
-
+  // ── Build deal object ─────────────────────────────────────────────────────
+  const chatId = event.message?.peerId?.channelId?.toString?.() || 'unknown';
+  const msgId  = event.message?.id || 'unknown';
   const deal = {
     ...parsed,
     asin:          resolved.asin,
@@ -119,38 +121,59 @@ async function pipeline(event, client) {
     originalUrl:   resolved.originalUrl,
     sourceChannel: chatId,
   };
+  console.log('[STEP 6] product resolved — title:', (deal.title || 'n/a').slice(0, 60),
+    '| price:', deal.dealPrice, '| disc:', deal.discount);
 
-  // ── Step 3: Quality filter ────────────────────────────────────────────────
-  const { pass, reason } = passesFilter(deal);
+  // ── PHASE 7: Quality filter ───────────────────────────────────────────────
+  console.log('[FILTER] checking quality');
+  let filterResult;
+  try {
+    filterResult = passesFilter(deal);
+  } catch (err) {
+    console.error('[PIPELINE FAIL]', err);
+    return;
+  }
+
+  const { pass, reason } = filterResult;
+  console.log('[FILTER RESULT]:', pass, reason || '');
   if (!pass) {
-    logger.info(`[Repost] SKIP msg=${msgId}: filter rejected [${reason}]`);
+    console.log('RETURN REASON: quality filter failed —', reason);
     stats.filteredCount++;
     stats.lastFilterReason = reason;
     return;
   }
-  logger.info(`[Repost] Filter: ${TEST_MODE ? 'BYPASSED (TEST_MODE)' : 'PASSED ✅'}`);
 
-  // ── Step 4: Duplicate check ───────────────────────────────────────────────
-  const isDup = await isAlreadyReposted(deal.asin, deal.affiliateUrl, deal.title);
+  // ── PHASE 8: Duplicate check ──────────────────────────────────────────────
+  console.log('[DUPLICATE] checking');
+  let isDup;
+  try {
+    isDup = await isAlreadyReposted(deal.asin, deal.affiliateUrl, deal.title);
+  } catch (err) {
+    console.error('[PIPELINE FAIL]', err);
+    return;
+  }
+
+  console.log('[DUPLICATE RESULT]:', isDup);
   if (isDup) {
-    logger.info(`[Repost] SKIP msg=${msgId}: duplicate ASIN=${deal.asin}`);
+    console.log('RETURN REASON: duplicate repost — ASIN:', deal.asin);
     stats.duplicateCount++;
     return;
   }
-  logger.info(`[Repost] Duplicate check: not a duplicate ✅`);
 
-  // ── Step 5: Post ──────────────────────────────────────────────────────────
-  logger.info(`[Repost] 🚀 Sending to channel — ASIN=${deal.asin} title="${(deal.title || '').slice(0, 55)}"`);
+  // ── PHASE 9: Telegram send ────────────────────────────────────────────────
+  console.log('[SEND] posting to telegram — ASIN:', deal.asin);
+  stats.totalMessagesReceived++;
+  stats.lastMessageAt = new Date().toISOString();
   try {
     await repostDeal(deal);
     await markReposted(deal.asin, deal.affiliateUrl, deal.title, deal.sourceChannel);
     stats.repostCount++;
     stats.lastRepostAt = new Date().toISOString();
-    logger.info(`[Repost] ✅ DELIVERED msg=${msgId} ASIN=${deal.asin} disc=${deal.discount}% ₹${deal.dealPrice}`);
+    console.log('[SEND SUCCESS]', deal.asin);
   } catch (postErr) {
     stats.errorCount++;
     stats.lastError = postErr.message;
-    logger.error(`[Repost] ❌ Delivery FAILED msg=${msgId} ASIN=${deal.asin}: ${postErr.message}`);
+    console.error('[SEND FAIL]', postErr);
   }
 }
 
