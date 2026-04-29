@@ -61,7 +61,7 @@ function isAllowedCategory(product) {
 }
 const { extractLinksFromCategory, cycleWarmUp, CATEGORY_DELAY_MIN_MS, CATEGORY_DELAY_MAX_MS } = require('./extractor');
 const antiBot = require('./antiBot');
-const { warmUpBrowser, checkLifecycle } = require('../scraper/browser');
+const { warmUpBrowser, checkLifecycle, getBrowserDiagnostics } = require('../scraper/browser');
 const { scrapeProduct }              = require('../scraper');
 const { generateFinalLink }          = require('../services/linkGenerator');
 const { evaluateDeal, upsertDeal }   = require('../engine/dealFilter');
@@ -125,6 +125,8 @@ async function runCrawlCycle() {
   global.lastCrawlerError = null;
 
   logger.info('[Crawler] ══ runCrawlCycle START ══');
+  const diag = getBrowserDiagnostics();
+  logger.info(`[Crawler] Browser diag: connected=${diag.connected} age=${diag.ageMinutes}min/${diag.ageLimit}min pages=${diag.pageCount}/${diag.pageLimit} warmUp=${diag.warmUpDone}`);
   logger.info(`[Crawler] AUTO_MODE=${autoMode.state.enabled} | PUBLIC_URL=${PUBLIC_URL}`);
   logger.info(`[Crawler] TELEGRAM_TOKEN=${process.env.TELEGRAM_TOKEN ? process.env.TELEGRAM_TOKEN.slice(0,8)+'…' : 'NOT SET'}`);
   logger.info(`[Crawler] TELEGRAM_CHAT=${process.env.TELEGRAM_CHAT || 'NOT SET'}`);
@@ -153,7 +155,10 @@ async function runCrawlCycle() {
   logger.info('═══ Crawl cycle starting ═══');
 
   try {
-    // ── Phase 0: Lifecycle check + Session warm-up ────────────────────────────
+    // ── Phase 0: Reset per-cycle state ───────────────────────────────────────
+    antiBot.resetCycleState();
+
+    // ── Phase 0b: Lifecycle check + Session warm-up ──────────────────────────
     // checkLifecycle → restarts Chrome if page/age limits exceeded (between cycles, never mid-scrape)
     // warmUpBrowser  → visits Amazon homepage once per browser session (cookies)
     // cycleWarmUp    → browse + search page every cycle (behavioral trust)
@@ -165,12 +170,16 @@ async function runCrawlCycle() {
     await cycleWarmUp();
 
     // ── Phase 1: Extract links from selected categories ───────────────────────
+    // No post-warmup rest needed — category pages are fetched via axios (plain HTTP),
+    // not Puppeteer, so there is no browser session continuity between the warm-up
+    // and category extraction. The warm-up is solely for the Puppeteer product
+    // scraping session that runs in Phase 2.
     const urlsByPlatform = { amazon: [] };
 
-    // Select 2–4 categories per cycle (rotating subset reduces request patterns)
+    // Select 1–2 categories per cycle (rotating subset reduces request patterns)
     // Skip any category currently blacklisted by the anti-bot module
     const availableCategories = CATEGORIES.filter(c => !antiBot.isBlacklisted(c.id));
-    const cycleCount          = 2 + Math.floor(Math.random() * 3);  // 2, 3, or 4
+    const cycleCount          = 1 + Math.floor(Math.random() * 2);  // 1 or 2
     const selectedCategories  = [...availableCategories]
       .sort(() => Math.random() - 0.5)
       .slice(0, Math.min(cycleCount, availableCategories.length));
@@ -191,6 +200,23 @@ async function runCrawlCycle() {
       } catch (err) {
         logger.error(`[${category.platform}] ${category.name} extraction failed: ${err.message}`);
         stats.errors++;
+      }
+
+      // If a bot-wall was hit inside extractLinksFromCategory, abort the rest of
+      // the category loop immediately. The session is compromised for this cycle —
+      // continuing to the next category would just hit more bot-walls on the same
+      // flagged session. The next cycle will do a fresh warm-up first.
+      if (antiBot.isBotWallThisCycle()) {
+        logger.warn('[Crawler] ⚠ Bot-wall detected this cycle — aborting remaining categories to rest session');
+        categoryStats.push({
+          categoryId:   category.id,
+          categoryName: category.name,
+          platform:     category.platform,
+          linksFound:   0,
+          newLinks:     0,
+          abortedBotWall: true,
+        });
+        break;
       }
 
       // Filter out recently-scraped URLs
@@ -343,8 +369,12 @@ async function processProduct(url, platform, stats) {
     metrics.observe('scrape.duration_ms', Date.now() - t0);
     metrics.increment(`scrape.${platform}.success`);
 
-    if (!product || !product.title || !product.price) {
-      logger.warn(`[Scrape][SKIP:no-data] title=${!!product?.title} price=${!!product?.price} url=${url}`);
+    if (!product) {
+      logger.warn(`[Scrape][SKIP:blocked] ${url} — scraper returned null (bot-wall / unavailable / redirect)`);
+      return;
+    }
+    if (!product.title || !product.price) {
+      logger.warn(`[Scrape][SKIP:no-data] title=${!!product.title} price=${!!product.price} url=${url}`);
       stats.errors++;
       return;
     }
@@ -436,7 +466,7 @@ async function processProduct(url, platform, stats) {
     const { shouldPost, reason, dealType } = await evaluateDeal(product);
 
     if (!shouldPost) {
-      logger.info(`Skip: "${product.title.slice(0, 50)}" — ${reason}`);
+      logger.info(`[Filter][SKIP:discount] "${product.title.slice(0, 50)}" — ${reason}`);
       return;
     }
 
@@ -475,8 +505,23 @@ async function processProduct(url, platform, stats) {
       }
 
       logger.info(`[Telegram] SENDING TO TELEGRAM: "${deal.title?.slice(0, 60)}" | price=₹${deal.price} discount=${deal.discount}% chat=${process.env.TELEGRAM_CHAT}`);
-      try {
-        await postDealToTelegram(deal);
+      let tgSent = false;
+      let tgLastErr = null;
+      for (let tgAttempt = 1; tgAttempt <= 3 && !tgSent; tgAttempt++) {
+        try {
+          if (tgAttempt > 1) {
+            logger.warn(`[Telegram] Retry ${tgAttempt}/3 for deal ${deal._id}…`);
+            await sleep(4000 * (tgAttempt - 1));
+          }
+          await postDealToTelegram(deal);
+          tgSent = true;
+        } catch (err) {
+          tgLastErr = err;
+          logger.warn(`[Telegram] Attempt ${tgAttempt}/3 failed: ${err.message}`);
+        }
+      }
+
+      if (tgSent) {
         const now = new Date();
         await Deal.findByIdAndUpdate(deal._id, {
           posted:       true,
@@ -505,18 +550,18 @@ async function processProduct(url, platform, stats) {
           discount: deal.discount,
           reason:   postReason,
         });
-      } catch (tgErr) {
-        const tgBody = tgErr.response?.body ?? tgErr.response ?? '';
-        logger.error(`[Telegram] ❌ SEND FAILED for deal ${deal._id}: ${tgErr.message} | response=${JSON.stringify(tgBody)}`);
+      } else {
+        const tgBody = tgLastErr?.response?.body ?? tgLastErr?.response ?? '';
+        logger.error(`[Telegram] ❌ SEND FAILED after 3 attempts for deal ${deal._id}: ${tgLastErr?.message} | response=${JSON.stringify(tgBody)}`);
         emit('crawler:deal-error', {
           type:    'error',
           title:   deal.title?.slice(0, 80),
           platform,
-          reason:  tgErr.message,
+          reason:  tgLastErr?.message,
         });
         await Deal.findByIdAndUpdate(deal._id, {
           'steps.telegram.done':  false,
-          'steps.telegram.error': tgErr.message,
+          'steps.telegram.error': tgLastErr?.message,
         }).catch(() => {});
       }
     }

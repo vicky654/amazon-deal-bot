@@ -376,24 +376,32 @@ function sendToTelegram(imageUrl, caption, buyLink = null) {
 }
 
 /**
- * Send an arbitrary text message to Telegram (custom message feature).
+ * Send an arbitrary text message to Telegram.
+ * Serialized through _tgSendChain — never fires concurrently with deal sends.
  * @param {string} message
  * @param {{ parse_mode?: 'Markdown'|'HTML' }} [opts]
  */
-async function sendMessageToTelegram(message, opts = {}) {
+function sendMessageToTelegram(message, opts = {}) {
   if (!bot || !CHAT_ID) {
     logger.warn('Telegram not configured — skipping message');
-    return null;
+    return Promise.resolve(null);
   }
-
-  try {
-    const result = await bot.sendMessage(CHAT_ID, message, opts);
-    logger.info('Custom message sent to Telegram');
-    return result;
-  } catch (error) {
-    logger.error(`Telegram message failed: ${error.message}`);
-    throw error;
-  }
+  return new Promise((resolve, reject) => {
+    _tgSendChain = _tgSendChain
+      .catch(() => {})
+      .then(async () => {
+        const preDelay = 2000 + Math.floor(Math.random() * 3000);
+        await _tgSleep(preDelay);
+        try {
+          const result = await bot.sendMessage(CHAT_ID, message, opts);
+          logger.info('Custom message sent to Telegram');
+          resolve(result);
+        } catch (err) {
+          logger.error(`Telegram message failed: ${err.message}`);
+          reject(err);
+        }
+      });
+  });
 }
 
 /**
@@ -406,18 +414,13 @@ async function sendAlert(message) {
 
 /**
  * Send a test ping to verify the bot is configured correctly.
+ * Serialized through _tgSendChain like all other sends.
  */
-async function sendTestMessage() {
-  if (!bot || !CHAT_ID) return false;
-
-  try {
-    await bot.sendMessage(CHAT_ID, '✅ DealBot is running and connected!');
-    logger.info('Telegram test message sent');
-    return true;
-  } catch (error) {
-    logger.error(`Telegram test failed: ${error.message}`);
-    return false;
-  }
+function sendTestMessage() {
+  if (!bot || !CHAT_ID) return Promise.resolve(false);
+  return sendMessageToTelegram('✅ DealBot is running and connected!')
+    .then(() => { logger.info('Telegram test message sent'); return true; })
+    .catch((err) => { logger.error(`Telegram test failed: ${err.message}`); return false; });
 }
 
 module.exports = {

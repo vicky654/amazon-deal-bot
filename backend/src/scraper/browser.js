@@ -33,13 +33,21 @@ puppeteer.use(StealthPlugin());
 
 const CHROME_PROFILE_DIR = path.join(__dirname, '..', '..', 'chrome-profile');
 
-// HEADLESS=false opens a visible Chrome window — use for debugging launch failures
-const IS_HEADLESS = process.env.HEADLESS !== 'false';
+// Default to visible Chrome (HEADLESS=false). Set HEADLESS=true to override.
+const IS_HEADLESS = process.env.HEADLESS === 'true';
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.85 Safari/537.36',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+];
+
+const HUMAN_VIEWPORTS = [
+  { width: 1280, height: 720 },
+  { width: 1366, height: 768 },
+  { width: 1440, height: 900 },
+  { width: 1536, height: 864 },
+  { width: 1920, height: 1080 },
 ];
 
 const LAUNCH_ARGS = [
@@ -290,11 +298,23 @@ function clearChromeLocks(profileDir) {
 }
 
 /**
- * On Windows: kill any lingering chrome.exe processes that hold the profile.
- * Safe on a dedicated bot server. Skipped on non-Windows platforms.
+ * On Windows: kill orphaned chrome.exe processes that hold our profile lock.
+ * Only runs when singleton lock files from CHROME_PROFILE_DIR are present —
+ * meaning a previous Chrome using this profile crashed and left a stale process.
+ * Skips the kill if no lock files exist, so a user's own Chrome is never touched.
  */
 function killLingeringChrome() {
   if (process.platform !== 'win32') return Promise.resolve(0);
+
+  // Only kill if our profile has orphaned lock files
+  const hasLock = ['SingletonLock', 'SingletonCookie', 'SingletonSocket']
+    .some(name => fs.existsSync(path.join(CHROME_PROFILE_DIR, name)));
+
+  if (!hasLock) {
+    logger.debug('[Browser] No Chrome lock files found — skipping kill (no orphan detected)');
+    return Promise.resolve(0);
+  }
+
   return new Promise((resolve) => {
     exec('tasklist /FI "IMAGENAME eq chrome.exe" /FO CSV /NH 2>NUL', (err, stdout) => {
       if (err || !stdout || !stdout.toLowerCase().includes('chrome.exe')) {
@@ -302,12 +322,12 @@ function killLingeringChrome() {
         return;
       }
       const count = (stdout.match(/chrome\.exe/gi) || []).length;
-      logger.warn(`[Browser] Found ${count} lingering chrome.exe process(es) — terminating`);
+      logger.warn(`[Browser] Lock files found + ${count} chrome.exe running — terminating orphan(s)`);
       exec('taskkill /F /IM chrome.exe /T 2>NUL', (killErr) => {
         if (killErr) {
           logger.warn(`[Browser] taskkill partial failure (may need admin rights): ${killErr.message}`);
         } else {
-          logger.info('[Browser] All lingering chrome.exe processes terminated');
+          logger.info('[Browser] Orphan chrome.exe processes terminated');
         }
         resolve(count);
       });
@@ -590,6 +610,18 @@ async function openPage({ blockAssets = false, ua = null } = {}) {
   const chosenUA = ua || USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
   await page.setUserAgent(chosenUA);
 
+  // Randomise viewport per page to break deterministic fingerprinting
+  const vp = HUMAN_VIEWPORTS[Math.floor(Math.random() * HUMAN_VIEWPORTS.length)];
+  await page.setViewport({ width: vp.width, height: vp.height, deviceScaleFactor: 1 });
+  await page.evaluateOnNewDocument(`(function(){
+    try {
+      Object.defineProperty(screen, 'width',       { get: () => ${vp.width},  configurable: true });
+      Object.defineProperty(screen, 'height',      { get: () => ${vp.height}, configurable: true });
+      Object.defineProperty(screen, 'availWidth',  { get: () => ${vp.width},  configurable: true });
+      Object.defineProperty(screen, 'availHeight', { get: () => ${vp.height - 40}, configurable: true });
+    } catch(e){}
+  })();`);
+
   await page.setExtraHTTPHeaders({
     'Accept-Language':           'en-IN,en;q=0.9',
     'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -624,6 +656,59 @@ function rand(max) { return Math.floor(Math.random() * max); }
 
 function randomDelay(min = 1500, max = 4000) {
   return sleep(min + rand(max - min));
+}
+
+// ── Human-like behaviour helpers ──────────────────────────────────────────────
+
+async function simulateHuman(page) {
+  const moves = 3 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < moves; i++) {
+    const x = 150 + Math.floor(Math.random() * 1000);
+    const y = 80  + Math.floor(Math.random() * 620);
+    await page.mouse.move(x, y, { steps: 10 + Math.floor(Math.random() * 12) });
+    await sleep(120 + Math.floor(Math.random() * 400));
+  }
+  if (Math.random() < 0.25) {
+    const w = 1280 + Math.floor(Math.random() * 160);
+    const h = 700  + Math.floor(Math.random() * 120);
+    await page.setViewport({ width: w, height: h }).catch(() => {});
+    await sleep(150 + Math.floor(Math.random() * 250));
+  }
+  if (Math.random() < 0.4) {
+    const hx = 300 + Math.floor(Math.random() * 700);
+    const hy = 200 + Math.floor(Math.random() * 400);
+    await page.mouse.move(hx, hy, { steps: 5 });
+    await sleep(400 + Math.floor(Math.random() * 800));
+  }
+}
+
+async function smoothScroll(page, targetY) {
+  await page.evaluate((target) => {
+    return new Promise((resolve) => {
+      const step  = Math.max(40, Math.ceil(target / 25));
+      let   pos   = window.scrollY || 0;
+      const timer = setInterval(() => {
+        pos = Math.min(pos + step, target);
+        window.scrollTo(0, pos);
+        if (pos >= target) { clearInterval(timer); resolve(); }
+      }, 55);
+    });
+  }, targetY);
+}
+
+// ── Browser diagnostics ───────────────────────────────────────────────────────
+
+function getBrowserDiagnostics() {
+  const ageMs = _browserStart ? Date.now() - _browserStart : 0;
+  return {
+    connected:  !!_browser && _browser.isConnected(),
+    isClosing:  _isClosing,
+    warmUpDone: _warmUpDone,
+    pageCount:  _pageCount,
+    pageLimit:  MAX_PAGES_BEFORE_RESTART,
+    ageMinutes: Math.round(ageMs / 60000),
+    ageLimit:   MAX_BROWSER_AGE_MIN,
+  };
 }
 
 // ── Lifecycle check — call at START of each crawler cycle, BEFORE warmup ─────
@@ -676,8 +761,8 @@ function getBrowserStats() {
 
 module.exports = {
   getBrowser, closeBrowser, openPage, warmUpBrowser,
-  checkLifecycle, getBrowserStats,
-  randomDelay, sleep,
+  checkLifecycle, getBrowserStats, getBrowserDiagnostics,
+  randomDelay, sleep, simulateHuman, smoothScroll,
   // Exposed for server.js graceful shutdown and self-test
   clearChromeLocks, killLingeringChrome, waitForChromeToDie,
   validateAndRepairProfile, CHROME_PROFILE_DIR,

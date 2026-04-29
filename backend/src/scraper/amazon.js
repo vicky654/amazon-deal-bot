@@ -10,17 +10,26 @@
  * Never retry:    redirects, unavailable products, bot walls
  */
 
-const { openPage, sleep } = require('./browser');
+const { openPage, sleep, simulateHuman, smoothScroll, randomDelay, getBrowserDiagnostics } = require('./browser');
 const logger = require('../../utils/logger');
+const fs   = require('fs');
+const path = require('path');
+
+const DEBUG_DIR = path.join(__dirname, '..', '..', 'debug');
 
 // ── Skip metrics (process-lifetime counters) ──────────────────────────────────
 const metrics = {
-  skipped_redirect:    0,
-  skipped_unavailable: 0,
-  skipped_bot_captcha: 0,
-  skipped_dom:         0,
-  success:             0,
-  failed:              0,  // exhausted all retries on transient errors
+  skipped_redirect:          0,
+  skipped_unavailable:       0,
+  skipped_bot_captcha:       0,
+  skipped_bot_wall:          0,
+  skipped_captcha:           0,
+  skipped_sign_in:           0,
+  skipped_homepage_redirect: 0,
+  skipped_wrong_layout:      0,
+  skipped_dom:               0,
+  success:                   0,
+  failed:                    0,  // exhausted all retries on transient errors
 };
 
 // ── Selectors ─────────────────────────────────────────────────────────────────
@@ -78,6 +87,42 @@ const UNAVAILABLE_PATTERN = /Currently unavailable|Currently out of stock|This i
 
 // ── Bot / CAPTCHA signals ─────────────────────────────────────────────────────
 const BOT_PATTERN = /Enter the characters you see below|we just need to make sure you're not a robot|automated access|api-services-support@amazon/i;
+
+// ── Product-page anti-bot classification ──────────────────────────────────────
+function classifyProductPage(html, title, finalUrl) {
+  if (!html || html.length < 1500) return 'blank-page';
+  const lower = html.toLowerCase();
+  const t     = (title || '').toLowerCase();
+  const url   = (finalUrl || '').toLowerCase();
+
+  if (/captcha|robot check|enter the characters/i.test(lower))                 return 'captcha';
+  if (/automated access|unusual traffic/i.test(lower))                         return 'bot-wall';
+  if (/we just need to make sure/i.test(lower))                                return 'bot-wall';
+  if (/sign-in|signin|ap_signin|auth-portal/i.test(url))                       return 'sign-in';
+  if (!url.includes('/dp/') && !url.includes('/gp/product/')) {
+    if (url === 'https://www.amazon.in/' || url === 'https://www.amazon.in')   return 'homepage-redirect';
+    if (url.includes('amazon.in') && !url.includes('/dp/') && !url.includes('/gp/product/')) return 'homepage-redirect';
+  }
+  if (!lower.includes('producttitle') && !lower.includes('priceblock') && !lower.includes('coreprice')) return 'wrong-layout';
+  return 'ok';
+}
+
+// ── Debug snapshot for product pages ──────────────────────────────────────────
+async function saveDebugSnapshot(page, label) {
+  try {
+    fs.mkdirSync(DEBUG_DIR, { recursive: true });
+    const safe = label.replace(/[^a-z0-9-]/gi, '_').toLowerCase().slice(0, 60);
+    const png  = path.join(DEBUG_DIR, `failure-${safe}.png`);
+    const html = path.join(DEBUG_DIR, `failure-${safe}.html`);
+    await page.screenshot({ path: png, fullPage: true }).catch(() => {});
+    const content = await page.content().catch(() => '');
+    if (content) fs.writeFileSync(html, content, 'utf8');
+    logger.warn(`[Amazon] Debug → ${png}`);
+    logger.warn(`[Amazon] Debug → ${html}`);
+  } catch (e) {
+    logger.warn(`[Amazon] saveDebugSnapshot failed: ${e.message}`);
+  }
+}
 
 // ── Page evaluator (serialised into browser — no closures allowed) ────────────
 
@@ -174,8 +219,10 @@ function skip(reason, url, noRetry = true) {
 async function scrapeAmazon(url, attempt = 1) {
   logger.info(`[Amazon] START → ${url} (attempt ${attempt}/${MAX_ATTEMPTS})`);
 
-  const asinMatch = url.match(/\/dp\/([A-Z0-9]{10})/i);
-  const asin      = asinMatch ? asinMatch[1].toUpperCase() : null;
+  // ASIN lifecycle — all declared before try/catch so every code path can reference them
+  const originalAsin = (url.match(/\/dp\/([A-Z0-9]{10})/i) || [])[1]?.toUpperCase() || null;
+  let extractedAsin  = null;  // set from page.url() after navigation
+  let finalAsin      = null;  // set from window.location.href via page.evaluate()
 
   let page = null;
 
@@ -196,11 +243,35 @@ async function scrapeAmazon(url, attempt = 1) {
     await page.waitForSelector('body', { timeout: 15000 });
 
     // ── Read HTML immediately (before sleep) for fast early exits ─────────────
-    const html = await page.content();
+    const html      = await page.content();
+    const finalUrl  = page.url();
+    const pageTitle = await page.title().catch(() => '(unavailable)');
+    const diag      = getBrowserDiagnostics();
+    const pageClass = classifyProductPage(html, pageTitle, finalUrl);
+
+    logger.info(
+      `[Amazon] Diagnostics url="${finalUrl}" title="${pageTitle}" class=${pageClass} ` +
+      `browserAge=${diag.ageMinutes}min/${diag.ageLimit}min pages=${diag.pageCount}/${diag.pageLimit}`
+    );
+
+    // ── Hard early return for blocked pages — before ANY ASIN regex or extraction ──
+    if (pageClass === 'bot-wall' || pageClass === 'captcha' || pageClass === 'homepage-redirect') {
+      logger.warn(`[Amazon] BLOCKED PAGE ${pageClass} → skipping`);
+      return null;
+    }
+
+    // ── Other non-product layouts — skip without retry ────────────────────────
+    if (pageClass === 'sign-in' || pageClass === 'wrong-layout') {
+      await saveDebugSnapshot(page, `amazon-${pageClass}-${originalAsin || 'unknown'}`);
+      throw skip(pageClass, url);
+    }
+
+    // Capture ASIN from the navigated URL — runs only on valid product pages
+    const navAsinMatch = finalUrl.match(/\/dp\/([A-Z0-9]{10})/i);
+    extractedAsin = navAsinMatch ? navAsinMatch[1].toUpperCase() : null;
 
     // ── Layer 3: Redirect guard (attempt 1 only — permanent, no retry) ────────
     if (attempt === 1) {
-      const finalUrl = page.url();
       const isRedirected =
         (!finalUrl.includes('/dp/') && !finalUrl.includes('/gp/product/')) ||
         REDIRECT_DOMAINS.some((d) => finalUrl.includes(d));
@@ -219,13 +290,18 @@ async function scrapeAmazon(url, attempt = 1) {
       }
     }
 
-    // ── Bot / CAPTCHA (no retry — same session will hit it again) ─────────────
+    // ── Bot / CAPTCHA fallback (no retry) ─────────────────────────────────────
     if (BOT_PATTERN.test(html)) {
+      await saveDebugSnapshot(page, `amazon-bot-${originalAsin || 'unknown'}`);
       throw skip('bot_captcha', url);
     }
 
-    // ── Settle page before DOM extraction ────────────────────────────────────
-    await sleep(3000);
+    // ── Human-like settle before DOM extraction ───────────────────────────────
+    await simulateHuman(page);
+    await randomDelay(2500, 5000);
+    const bodyH = await page.evaluate(() => document.body.scrollHeight).catch(() => 2000);
+    await smoothScroll(page, Math.floor(bodyH * (0.2 + Math.random() * 0.3)));
+    await randomDelay(800, 1800);
 
     // ── Wait for title (best-effort) ─────────────────────────────────────────
     await page.waitForSelector('#productTitle', { timeout: 15000 }).catch(() => {
@@ -252,9 +328,29 @@ async function scrapeAmazon(url, attempt = 1) {
       throw new Error(`Missing data — title=${!!raw.title} price=${!!raw.price}`);
     }
 
+    // Resolve ASIN — prefer page-reported URL over navigated URL over input URL.
+    // Amazon silently redirects superseded/variant ASINs to the active product;
+    // using the original ASIN would generate an affiliate URL that returns 404.
+    const rawAsinMatch = (raw.url || '').match(/\/dp\/([A-Z0-9]{10})/i);
+    finalAsin = rawAsinMatch ? rawAsinMatch[1].toUpperCase() : null;
+
+    const safeAsin = finalAsin || extractedAsin || originalAsin || null;
+
+    if (!safeAsin) {
+      logger.warn(`[Amazon] SKIP — could not resolve ASIN from URL or page: ${url}`);
+      return null;
+    }
+
+    const resolvedFrom = finalAsin ? 'page-eval' : extractedAsin ? 'page-url' : 'input-url';
+    if (finalAsin && originalAsin && finalAsin !== originalAsin) {
+      logger.warn(`[Amazon] ASIN redirected: ${originalAsin} → ${finalAsin} (affiliate URL updated to final ASIN)`);
+    } else {
+      logger.info(`[Amazon] ASIN resolved=${safeAsin} source=${resolvedFrom}`);
+    }
+
     metrics.success++;
-    logger.info(`[Amazon][OK] "${raw.title.slice(0, 55)}" price=₹${raw.price} disc=${raw.discount ?? '?'}% img=${!!raw.image} asin=${asin}`);
-    return { ...raw, asin, platform: 'amazon' };
+    logger.info(`[Amazon][OK] "${raw.title.slice(0, 55)}" price=₹${raw.price} disc=${raw.discount ?? '?'}% img=${!!raw.image} asin=${safeAsin}`);
+    return { ...raw, asin: safeAsin, platform: 'amazon' };
 
   } catch (err) {
     logger.error(`[Amazon] FAIL (attempt ${attempt}/${MAX_ATTEMPTS}) → ${err.message}`);

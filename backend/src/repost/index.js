@@ -54,6 +54,7 @@ const stats = {
 
 let _running       = false;
 let _watchdogTimer = null;
+let _restarting    = false; // guard against concurrent watchdog restarts
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
@@ -88,27 +89,34 @@ async function pipeline(event, client) {
   }
   logger.info(`[Repost] Parsed — title="${(parsed.title || 'null').slice(0, 60)}" price=₹${parsed.dealPrice} disc=${parsed.discount}%`);
 
-  // ── Step 2: Resolve Amazon link ───────────────────────────────────────────
+  // ── Step 2: Resolve + validate Amazon link ───────────────────────────────
+  // This gate is ALWAYS enforced regardless of TEST_MODE.
+  // TEST_MODE only bypasses quality filters (price/discount thresholds).
+  // A real, validated ASIN is required before any message is posted.
   const resolved = await resolveAmazonLink(parsed.allUrls);
 
   if (!resolved) {
-    if (!TEST_MODE) {
-      logger.info(`[Repost] SKIP msg=${msgId}: no Amazon link found (platform=${platform})`);
-      stats.filteredCount++;
-      stats.lastFilterReason = 'no-amazon-link';
-      return;
-    }
-    // TEST_MODE: proceed without Amazon link
-    logger.info(`[Repost] TEST_MODE: no Amazon link — using first URL as placeholder`);
-  } else {
-    logger.info(`[Repost] Amazon link resolved → ASIN=${resolved.asin} url=${resolved.affiliateUrl}`);
+    logger.info(`[Repost] SKIP msg=${msgId}: no valid Amazon product link found (platform=${platform})`);
+    stats.filteredCount++;
+    stats.lastFilterReason = 'no-valid-amazon-link';
+    return;
   }
+
+  // Sanity-check the resolved ASIN format
+  if (!/^[A-Z0-9]{10}$/.test(resolved.asin)) {
+    logger.warn(`[Repost] SKIP msg=${msgId}: invalid ASIN format "${resolved.asin}"`);
+    stats.filteredCount++;
+    stats.lastFilterReason = `invalid-asin:${resolved.asin}`;
+    return;
+  }
+
+  logger.info(`[Repost] ✅ Amazon link validated → ASIN=${resolved.asin} url=${resolved.affiliateUrl}`);
 
   const deal = {
     ...parsed,
-    asin:          resolved?.asin    || `TEST_${msgId}`,
-    affiliateUrl:  resolved?.affiliateUrl || parsed.allUrls[0] || 'https://www.amazon.in/',
-    originalUrl:   resolved?.originalUrl  || parsed.allUrls[0],
+    asin:          resolved.asin,
+    affiliateUrl:  resolved.affiliateUrl,
+    originalUrl:   resolved.originalUrl,
     sourceChannel: chatId,
   };
 
@@ -152,23 +160,28 @@ const WATCHDOG_MS = 5 * 60 * 1000;
 
 async function _runWatchdog() {
   if (!_running) return;
+  if (_restarting) { logger.debug('[Repost] Watchdog: restart already in progress — skipping tick'); return; }
+
   const healthy = await isHealthy();
   if (healthy) { logger.debug('[Repost] Watchdog: connection healthy'); return; }
 
+  _restarting = true;
   stats.errorCount++;
   stats.lastError = 'watchdog: connection lost';
   logger.warn('[Repost] Watchdog: Telegram connection lost — restarting listener…');
 
-  try { await disconnect(); } catch (_) {}
-  await new Promise(r => setTimeout(r, 5000));
-
   try {
+    try { await disconnect(); } catch (_) {}
+    await new Promise(r => setTimeout(r, 5000));
+
     const channels = await startListener(pipeline);
     stats.monitoredChannels = channels || [];
     logger.info('[Repost] Watchdog: ✅ listener restarted');
   } catch (err) {
     stats.lastError = err.message;
     logger.error(`[Repost] Watchdog: restart failed: ${err.message}`);
+  } finally {
+    _restarting = false;
   }
 }
 

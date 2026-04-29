@@ -91,8 +91,8 @@ async function getClient() {
     langCode:            'en',
   });
 
-  // Suppress GramJS internal console spam
-  _client.setLogLevel('none');
+  // Show GramJS errors and warnings — 'none' hides connection problems silently
+  _client.setLogLevel('warn');
 
   await _client.connect();
 

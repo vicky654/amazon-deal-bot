@@ -149,8 +149,14 @@ app.use(express.static(path.join(__dirname, 'public')));
  * ─── GLOBAL ERROR HANDLERS ────────────────────────────────────────────────────
  */
 
-process.on('unhandledRejection', (err) => logger.error(`Unhandled rejection: ${err?.message || err}`));
-process.on('uncaughtException',  (err) => logger.error(`Uncaught exception: ${err?.message || err}`));
+process.on('unhandledRejection', (err) => {
+  logger.error(`Unhandled rejection: ${err?.message || err}`);
+  process.exit(1);
+});
+process.on('uncaughtException', (err) => {
+  logger.error(`Uncaught exception: ${err?.message || err}`);
+  process.exit(1);
+});
 
 /*
  * ─── MONGODB ──────────────────────────────────────────────────────────────────
@@ -158,7 +164,15 @@ process.on('uncaughtException',  (err) => logger.error(`Uncaught exception: ${er
 
 mongoose
   .connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
-  .then(() => logger.info('MongoDB connected'))
+  .then(async () => {
+    logger.info('MongoDB connected');
+    // Load persisted auto mode state (on/off toggle survives restarts)
+    try {
+      const autoMode = require('./src/autoMode');
+      await autoMode.loadState();
+      logger.info(`[Boot] Auto mode: ${autoMode.state.enabled ? 'ON' : 'OFF'}`);
+    } catch (_) {}
+  })
   .catch((err) => logger.error(`MongoDB connection error: ${err.message}`));
 
 /*

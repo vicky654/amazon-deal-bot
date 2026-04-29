@@ -2,29 +2,36 @@
 /**
  * Amazon India Category Link Extractor
  *
- * Anti-bot hardening:
- *   - Images allowed (blocking images is a known Amazon bot-detection trigger)
- *   - Mouse movement simulation after page load
- *   - Network response + requestfailed monitoring per page
- *   - CAPTCHA / bot-wall / SSL page classified exactly
- *   - waitForFunction on ASIN pattern (not just .s-main-slot which exists on error pages)
- *   - Smooth incremental scrolling
- *   - Debug screenshot + HTML saved on every failure
+ * Category pages  → axios + cheerio (SSR HTML, no JS execution needed)
+ * Warm-up pages   → Puppeteer (builds Puppeteer session trust for product scraping)
+ *
+ * IMPORTANT: Amazon /s? category listing pages are server-side rendered.
+ * The full product grid with data-asin attributes is present in the initial
+ * HTTP response — no JavaScript execution is required to see ASINs.
+ * Using axios (plain HTTP) avoids all browser-automation fingerprints.
+ * Puppeteer is reserved for product detail pages (src/scraper/amazon.js)
+ * where JS rendering is genuinely required.
+ *
+ * This is the approach that worked reliably in the original working version.
+ * The regression was introduced when category extraction was switched to Puppeteer.
  */
 
-const fs   = require('fs');
-const path = require('path');
+const fs    = require('fs');
+const path  = require('path');
+const axios = require('axios');
 
-const { openPage, sleep } = require('../scraper/browser');
-const logger   = require('../../utils/logger');
-const antiBot  = require('./antiBot');
+const { openPage, sleep, smoothScroll } = require('../scraper/browser');
+const logger  = require('../../utils/logger');
+const antiBot = require('./antiBot');
 
 const DEBUG_DIR = path.join(__dirname, '..', '..', 'debug');
 
-const PAGE_DELAY_MS_MIN     = 2000;
-const PAGE_DELAY_MS_MAX     = 8000;
-const CATEGORY_DELAY_MIN_MS = 15000;
-const CATEGORY_DELAY_MAX_MS = 45000;
+// ── Delays ─────────────────────────────────────────────────────────────────────
+// axios fetches complete in ~1–3 s — moderate delays are sufficient
+const PAGE_DELAY_MS_MIN     = 2000;   // between pages within a category
+const PAGE_DELAY_MS_MAX     = 6000;
+const CATEGORY_DELAY_MIN_MS = 8000;   // between categories
+const CATEGORY_DELAY_MAX_MS = 20000;
 
 const metrics = {
   skipped_no_price:  0,
@@ -32,312 +39,218 @@ const metrics = {
   enqueued:          0,
 };
 
-// ── Bot / block / SSL page signals ───────────────────────────────────────────
-const BOT_SIGNALS = [
-  'enter the characters you see below',
-  'automated access',
-  'api-services-support@amazon',
-  'robot check',
-  'sorry, we just need to make sure',
-  'type the characters you see in this image',
-  'captcha',
-  'your connection is not private',   // SSL warning page
-  'err_cert_authority_invalid',
-  'this site can',                    // "This site can't be reached"
-  'unusual traffic',
+// ── Request headers — rotate UA, include full realistic browser header set ─────
+const AXIOS_USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
 ];
 
-function classifyPage(html, title) {
-  if (!html || html.length < 1500) return 'blank-page';
+function randomAxiosHeaders() {
+  const ua = AXIOS_USER_AGENTS[Math.floor(Math.random() * AXIOS_USER_AGENTS.length)];
+  return {
+    'User-Agent':                ua,
+    'Accept-Language':           'en-IN,en;q=0.9,en-GB;q=0.8',
+    'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Encoding':           'gzip, deflate, br',
+    'Cache-Control':             'max-age=0',
+    'Upgrade-Insecure-Requests': '1',
+    'DNT':                       '1',
+    'Connection':                'keep-alive',
+    'sec-ch-ua':                 '"Not A(Brand";v="99", "Google Chrome";v="122", "Chromium";v="122"',
+    'sec-ch-ua-mobile':          '?0',
+    'sec-ch-ua-platform':        '"Windows"',
+    'Sec-Fetch-Dest':            'document',
+    'Sec-Fetch-Mode':            'navigate',
+    'Sec-Fetch-Site':            'none',
+    'Sec-Fetch-User':            '?1',
+  };
+}
+
+// ── Page classifier for raw HTTP responses ─────────────────────────────────────
+function classifyPage(html, finalUrl) {
+  if (!html || html.length < 500) return 'blank-page';
   const lower = html.toLowerCase();
-  const t     = (title || '').toLowerCase();
-  if (/captcha|robot check|enter the characters/i.test(lower))                 return 'captcha';
-  if (/your connection is not private|err_cert/i.test(lower))                  return 'ssl-warning';
-  if (/automated access|unusual traffic/i.test(lower))                         return 'bot-wall';
-  if (/sorry|we just need to make sure/i.test(lower))                          return 'bot-wall';
-  if (/this site can|err_connection|err_name/i.test(lower))                    return 'network-error';
-  if (/no results for|didn.*t find/i.test(lower))                              return 'no-results';
-  if (!lower.includes('s-result-item') && !lower.includes('s-search-result')) return 'wrong-layout';
+
+  if (/captcha|robot check|enter the characters/i.test(lower))  return 'captcha';
+  if (/automated access|unusual traffic/i.test(lower))          return 'bot-wall';
+  if (/sorry, we just need to make sure/i.test(lower))          return 'bot-wall';
+  if (/your connection is not private|err_cert/i.test(lower))   return 'ssl-warning';
+  if (/this site can|err_connection|err_name/i.test(lower))     return 'network-error';
+  if (/no results for|didn.*t find/i.test(lower))               return 'no-results';
+
+  // Homepage redirect — response URL lost the search path
+  if (finalUrl) {
+    const u = finalUrl.toLowerCase();
+    if (u.includes('amazon.in') && !u.includes('/s?') && !u.includes('keywords=') && !u.includes('k=') && !u.includes('&page=')) {
+      if (u === 'https://www.amazon.in/' || u.endsWith('amazon.in/')) {
+        return 'homepage-redirect';
+      }
+    }
+  }
+
+  // Valid category page must have search result items or data-asin attributes
+  const hasResults = lower.includes('s-result-item') || lower.includes('s-search-result') || /data-asin="[a-z0-9]{10}"/i.test(html);
+  if (!hasResults) return 'wrong-layout';
+
   return 'ok';
 }
 
 // ── Debug snapshot ────────────────────────────────────────────────────────────
-async function saveDebugFiles(page, label) {
+function saveDebugHtml(html, label) {
   try {
     fs.mkdirSync(DEBUG_DIR, { recursive: true });
-    const safe = label.replace(/[^a-z0-9-]/gi, '_').toLowerCase().slice(0, 60);
-    const png  = path.join(DEBUG_DIR, `failure-${safe}.png`);
-    const html = path.join(DEBUG_DIR, `failure-${safe}.html`);
-
-    await page.screenshot({ path: png, fullPage: true }).catch(() => {});
-    const content = await page.content().catch(() => '');
-    if (content) fs.writeFileSync(html, content, 'utf8');
-
-    logger.warn(`[Extractor] Debug → ${png}`);
-    logger.warn(`[Extractor] Debug → ${html}`);
+    const safe     = label.replace(/[^a-z0-9-]/gi, '_').toLowerCase().slice(0, 60);
+    const htmlPath = path.join(DEBUG_DIR, `failure-${safe}.html`);
+    fs.writeFileSync(htmlPath, html, 'utf8');
+    logger.warn(`[Extractor] Debug HTML → ${htmlPath}`);
   } catch (e) {
-    logger.warn(`[Extractor] saveDebugFiles failed: ${e.message}`);
+    logger.warn(`[Extractor] saveDebugHtml failed: ${e.message}`);
   }
 }
 
-// ── Network monitoring — attaches to a page and logs failures/challenges ─────
-function setupNetworkMonitoring(page, label) {
-  const WATCH_PATTERNS = /captcha|challenge|robot|blocked|errors|georestrict/i;
-  let api400Count = 0;
+// ── Known placeholder / invalid ASINs Amazon puts in non-product elements ──────
+const BAD_ASINS = new Set([
+  '0000000000', 'XXXXXXXXXX', 'AAAAAAAAA1', 'B000000000',
+]);
 
-  page.on('response', (res) => {
-    const status = res.status();
-    const url    = res.url();
-    if (status === 400 && url.includes('data.amazon.in')) {
-      api400Count++;
-      if (api400Count === 1) antiBot.record('api-400');  // record once per page
-      logger.warn(`[Net][${label}] API 400 #${api400Count} ← ${url.slice(0, 100)}`);
-    } else if (status >= 400 && url.includes('amazon.in')) {
-      logger.warn(`[Net][${label}] ${status} ← ${url.slice(0, 100)}`);
+// ── ASIN extraction — targets real search result cards only ───────────────────
+//
+// Amazon search result HTML structure:
+//   <div data-component-type="s-search-result" ... data-asin="B08FKW96T1" ...>
+//
+// Both attributes live on the SAME opening tag.
+// We find the marker, walk back to the tag start (<), read to >, then extract.
+// This avoids matching ASINs from ad containers, "also viewed" widgets, or
+// carousels that have data-asin but NOT data-component-type="s-search-result".
+function extractAsinsFromHtml(html) {
+  const urls      = new Set();
+  const rejected  = { bad: 0, format: 0 };
+  const MARKER    = 'data-component-type="s-search-result"';
+  let   searchPos = 0;
+
+  while (true) {
+    const markerPos = html.indexOf(MARKER, searchPos);
+    if (markerPos === -1) break;
+
+    // Walk back to find the opening '<' of this tag
+    let tagStart = markerPos;
+    while (tagStart > 0 && html[tagStart] !== '<') tagStart--;
+
+    // Find the closing '>' of this tag
+    const tagEnd = html.indexOf('>', markerPos);
+    if (tagEnd === -1) { searchPos = markerPos + 1; continue; }
+
+    const tag       = html.slice(tagStart, tagEnd + 1);
+    const asinMatch = tag.match(/data-asin="([A-Z0-9]{10})"/i);
+
+    if (asinMatch) {
+      const asin = asinMatch[1].toUpperCase();
+      if (!/^[A-Z0-9]{10}$/.test(asin)) {
+        rejected.format++;
+      } else if (BAD_ASINS.has(asin)) {
+        rejected.bad++;
+      } else {
+        urls.add(`https://www.amazon.in/dp/${asin}`);
+      }
     }
-    if (WATCH_PATTERNS.test(url)) {
-      logger.warn(`[Net][${label}] Suspicious URL: ${url.slice(0, 120)}`);
+
+    searchPos = tagEnd + 1;
+  }
+
+  // Fallback: if no result cards found (layout change), scan all data-asin attrs
+  if (urls.size === 0) {
+    logger.debug('[Extractor] No s-search-result cards found — falling back to all data-asin scan');
+    for (const m of html.matchAll(/data-asin="([A-Z0-9]{10})"/gi)) {
+      const asin = m[1].toUpperCase();
+      if (/^[A-Z0-9]{10}$/.test(asin) && !BAD_ASINS.has(asin)) {
+        urls.add(`https://www.amazon.in/dp/${asin}`);
+      }
     }
-  });
+  }
 
-  page.on('requestfailed', (req) => {
-    const err = req.failure()?.errorText || 'unknown';
-    const url = req.url();
-    // Only log Amazon-domain failures (CDN/image failures are noise)
-    if (url.includes('amazon.in') && !['net::ERR_ABORTED'].includes(err)) {
-      logger.warn(`[Net][${label}] FAILED ${err} — ${url.slice(0, 100)}`);
+  // Last-resort fallback: /dp/ href links
+  if (urls.size === 0) {
+    for (const m of html.matchAll(/href="[^"]*\/dp\/([A-Z0-9]{10})[^"]*"/gi)) {
+      const asin = m[1].toUpperCase();
+      if (/^[A-Z0-9]{10}$/.test(asin) && !BAD_ASINS.has(asin)) {
+        urls.add(`https://www.amazon.in/dp/${asin}`);
+      }
     }
-  });
-
-  return { getApi400Count: () => api400Count };
-}
-
-// ── Smooth scroll — incremental, not instant ─────────────────────────────────
-async function smoothScrollTo(page, targetY) {
-  await page.evaluate((target) => {
-    return new Promise((resolve) => {
-      const step  = Math.max(40, Math.ceil(target / 25));
-      let   pos   = window.scrollY || 0;
-      const timer = setInterval(() => {
-        pos = Math.min(pos + step, target);
-        window.scrollTo(0, pos);
-        if (pos >= target) { clearInterval(timer); resolve(); }
-      }, 55);
-    });
-  }, targetY);
-}
-
-// ── Human behavior simulation — mouse, reading pauses, viewport variation ─────
-async function simulateHuman(page) {
-  // Randomised mouse movement across the viewport
-  const moves = 3 + Math.floor(Math.random() * 4);
-  for (let i = 0; i < moves; i++) {
-    const x = 150 + Math.floor(Math.random() * 1000);
-    const y = 80  + Math.floor(Math.random() * 620);
-    await page.mouse.move(x, y, { steps: 10 + Math.floor(Math.random() * 12) });
-    await sleep(120 + Math.floor(Math.random() * 400));
-  }
-  // Occasional slight viewport resize — real users resize browser windows
-  if (Math.random() < 0.25) {
-    const w = 1280 + Math.floor(Math.random() * 160);
-    const h = 700  + Math.floor(Math.random() * 120);
-    await page.setViewport({ width: w, height: h }).catch(() => {});
-    await sleep(150 + Math.floor(Math.random() * 250));
-  }
-  // Occasional hover pause — simulates reading a result card
-  if (Math.random() < 0.4) {
-    const hx = 300 + Math.floor(Math.random() * 700);
-    const hy = 200 + Math.floor(Math.random() * 400);
-    await page.mouse.move(hx, hy, { steps: 5 });
-    await sleep(400 + Math.floor(Math.random() * 800));
-  }
-}
-
-// ── Page evaluator (serialisable — no closures) ───────────────────────────────
-function amazonPageEvaluator() {
-  const cards = Array.from(
-    document.querySelectorAll('[data-component-type="s-search-result"][data-asin]')
-  );
-
-  let enqueued = 0, skipped_no_price = 0, skipped_sponsored = 0;
-  const urls = [];
-
-  for (const card of cards) {
-    const asin = (card.getAttribute('data-asin') || '').toUpperCase();
-    if (!asin || !/^[A-Z0-9]{10}$/.test(asin)) continue;
-
-    // Skip sponsored
-    if (
-      card.querySelector('.puis-sponsored-label-text') ||
-      card.querySelector('.s-sponsored-label-info-icon') ||
-      card.querySelector('.s-label-popover-default') ||
-      card.querySelector('[data-component-type="s-ads-carousel"]')
-    ) { skipped_sponsored++; continue; }
-
-    // Price must include ₹
-    const priceEl   = card.querySelector('.a-price .a-offscreen, .a-price-whole, .a-color-price');
-    const priceText = priceEl ? (priceEl.innerText || priceEl.textContent || '') : '';
-    if (!priceText.trim() || !priceText.includes('₹')) { skipped_no_price++; continue; }
-
-    urls.push(`https://www.amazon.in/dp/${asin}`);
-    enqueued++;
   }
 
-  return { total: cards.length, enqueued, skipped_no_price, skipped_sponsored, urls };
+  if (rejected.format > 0 || rejected.bad > 0) {
+    logger.debug(`[Extractor] ASIN extraction: rejected format=${rejected.format} bad=${rejected.bad}`);
+  }
+
+  return [...urls];
 }
 
-// ── Single-page extraction ────────────────────────────────────────────────────
-// Returns { urls: string[] | null, pageClass: string }
+// ── Single-page fetch via axios ────────────────────────────────────────────────
+async function fetchCategoryPage(url, categoryName, pageNum) {
+  const label = `${categoryName}-p${pageNum}`;
+  logger.info(`[Extractor] ── ${categoryName} p${pageNum} ──`);
+  logger.info(`[Extractor]   URL: ${url}`);
 
-async function extractOnePage(url, categoryName, pageNum) {
-  let page      = null;
-  let pageClass = 'unknown';
-
+  let response;
   try {
-    // 'media' mode: images + CSS allowed, only font/video blocked
-    // Images MUST be allowed — Amazon bot detection flags sessions with 0 image requests
-    page = await openPage({ blockAssets: 'media' });
-
-    const net = setupNetworkMonitoring(page, `${categoryName}-p${pageNum}`);
-
-    logger.info(`[Extractor] ── ${categoryName} p${pageNum} ──`);
-    logger.info(`[Extractor]   URL: ${url}`);
-
-    // ── Navigate ─────────────────────────────────────────────────────────────
-    try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 55000 });
-    } catch (navErr) {
-      logger.error(`[Extractor] Navigation error — ${categoryName} p${pageNum}: ${navErr.message}`);
-      if (/ERR_CERT|SSL|certificate/i.test(navErr.message)) {
-        logger.error(`[Extractor] ⚠ SSL error — --ignore-certificate-errors may not have applied correctly`);
-      }
-      if (/timeout/i.test(navErr.message)) {
-        logger.warn(`[Extractor] Timeout — Amazon may be slow-loading to detect bots`);
-      }
-      await saveDebugFiles(page, `${categoryName}-p${pageNum}-nav`);
-      return { urls: null, pageClass: 'nav-error' };
-    }
-
-    // ── Random idle after navigation — avoids deterministic timing fingerprint ─
-    await sleep(1500 + Math.floor(Math.random() * 2500));
-
-    // ── Post-navigation validation ────────────────────────────────────────────
-    const finalUrl  = page.url();
-    const pageTitle = await page.title().catch(() => '(unavailable)');
-    const htmlSnap  = await page.content().catch(() => '');
-    pageClass       = classifyPage(htmlSnap, pageTitle);
-
-    logger.info(`[Extractor] Loaded URL:  ${finalUrl}`);
-    logger.info(`[Extractor] Page title:  ${pageTitle}`);
-    logger.info(`[Extractor] Page class:  ${pageClass}`);
-    logger.info(`[Extractor] HTML size:   ${htmlSnap.length} bytes`);
-
-    if (pageClass !== 'ok' && pageClass !== 'wrong-layout') {
-      logger.warn(`[Extractor] ✖ Page is "${pageClass}" — saving debug files and aborting`);
-      await saveDebugFiles(page, `${categoryName}-p${pageNum}-${pageClass}`);
-      return { urls: null, pageClass };
-    }
-
-    // ── Simulate human behavior before waiting for grid ───────────────────────
-    await simulateHuman(page);
-    await sleep(600 + Math.floor(Math.random() * 600));
-
-    // ── Wait for real ASIN product cards ──────────────────────────────────────
-    // waitForFunction is stricter than waitForSelector:
-    //   - validates ASIN pattern (rules out placeholder cards)
-    //   - .s-main-slot appears on error/empty pages too — we don't use it
-    const gridAppeared = await page
-      .waitForFunction(() => {
-        const cards = document.querySelectorAll('[data-component-type="s-search-result"][data-asin]');
-        return Array.from(cards).some(c => /^[A-Z0-9]{10}$/.test(c.getAttribute('data-asin') || ''));
-      }, { timeout: 28000, polling: 800 })
-      .then(() => true)
-      .catch(() => false);
-
-    logger.info(`[Extractor] Search grid found: ${gridAppeared}`);
-
-    if (!gridAppeared) {
-      // Refresh HTML for accurate diagnosis (page may have changed since first read)
-      const html2  = await page.content().catch(() => '');
-      const class2 = classifyPage(html2, pageTitle);
-
-      // Count any ASIN-like strings in raw HTML as last-resort signal
-      const rawAsinCount = (html2.match(/data-asin="[A-Z0-9]{10}"/gi) || []).length;
-
-      logger.warn(`[Extractor] ✖ Grid not found — ${categoryName} p${pageNum}`);
-      logger.warn(`[Extractor]   Final URL  : ${finalUrl}`);
-      logger.warn(`[Extractor]   Page class : ${class2}`);
-      logger.warn(`[Extractor]   HTML size  : ${html2.length} bytes`);
-      logger.warn(`[Extractor]   Raw ASINs  : ${rawAsinCount} in HTML (DOM may have timed out)`);
-
-      await saveDebugFiles(page, `${categoryName}-p${pageNum}`);
-      return { urls: null, pageClass: class2 };
-    }
-
-    // ── Reading pause — simulates user scanning results before scrolling ──────
-    await sleep(800 + Math.floor(Math.random() * 1500));
-
-    // ── Smooth scroll to trigger lazy-loaded cards ────────────────────────────
-    const bodyHeight = await page.evaluate(() => document.body.scrollHeight);
-    const depth1     = 0.30 + Math.random() * 0.15;   // 30–45 %
-    const depth2     = 0.65 + Math.random() * 0.15;   // 65–80 %
-    await smoothScrollTo(page, Math.floor(bodyHeight * depth1));
-    await sleep(700 + Math.floor(Math.random() * 600));
-    await smoothScrollTo(page, Math.floor(bodyHeight * depth2));
-    await sleep(500 + Math.floor(Math.random() * 500));
-    await smoothScrollTo(page, bodyHeight);
-    await sleep(400 + Math.floor(Math.random() * 400));
-
-    // ── Extract product links ─────────────────────────────────────────────────
-    const result = await page.evaluate(amazonPageEvaluator);
-
-    logger.info(
-      `[Extractor] ${categoryName} p${pageNum}: ` +
-      `cards=${result.total} enqueued=${result.enqueued} ` +
-      `skipped_no_price=${result.skipped_no_price} skipped_sponsored=${result.skipped_sponsored} ` +
-      `api400=${net.getApi400Count()}`
-    );
-
-    metrics.enqueued          += result.enqueued;
-    metrics.skipped_no_price  += result.skipped_no_price;
-    metrics.skipped_sponsored += result.skipped_sponsored;
-
-    // ── Fallback: href scan when evaluator returns 0 ──────────────────────────
-    if (result.enqueued === 0) {
-      logger.warn(`[Extractor] Primary evaluator 0 — trying href fallback`);
-      const fallbackUrls = await page.evaluate(() => {
-        const seen = new Set();
-        document.querySelectorAll('a[href*="/dp/"]').forEach((a) => {
-          const m = (a.href || '').match(/\/dp\/([A-Z0-9]{10})/i);
-          if (m) seen.add(`https://www.amazon.in/dp/${m[1].toUpperCase()}`);
-        });
-        return [...seen];
-      });
-      if (fallbackUrls.length > 0) {
-        logger.info(`[Extractor] Href fallback: ${fallbackUrls.length} ASINs on ${categoryName} p${pageNum}`);
-        return { urls: fallbackUrls, pageClass: 'ok' };
-      }
-      logger.warn(`[Extractor] Href fallback also 0 — saving snapshot`);
-      await saveDebugFiles(page, `${categoryName}-p${pageNum}-empty`);
-    }
-
-    return { urls: result.urls, pageClass };
-
+    response = await axios.get(url, {
+      headers:        randomAxiosHeaders(),
+      timeout:        25000,
+      maxRedirects:   5,
+      validateStatus: (s) => s < 500,
+    });
   } catch (err) {
-    logger.error(`[Extractor] Exception — ${categoryName} p${pageNum}: ${err.message}`);
-    if (page) await saveDebugFiles(page, `${categoryName}-p${pageNum}-exc`).catch(() => {});
-    return { urls: null, pageClass: 'exception' };
-  } finally {
-    if (page) await page.close().catch(() => {});
+    logger.error(`[Extractor] axios error on ${label}: ${err.message}`);
+    antiBot.record('blocked');
+    return { urls: null, pageClass: 'network-error' };
   }
+
+  const statusCode = response.status;
+  const finalUrl   = response.request?.res?.responseUrl || response.config?.url || url;
+  const html       = typeof response.data === 'string' ? response.data : '';
+
+  logger.info(`[Extractor] Status: ${statusCode} | HTML: ${html.length} bytes | Final URL: ${finalUrl}`);
+
+  if (statusCode === 503 || statusCode === 429) {
+    logger.warn(`[Extractor] Rate-limited (${statusCode}) on ${label}`);
+    antiBot.record('bot-wall');
+    return { urls: null, pageClass: 'bot-wall' };
+  }
+
+  if (statusCode >= 400) {
+    logger.warn(`[Extractor] HTTP ${statusCode} on ${label}`);
+    antiBot.record('blocked');
+    return { urls: null, pageClass: 'blocked' };
+  }
+
+  const pageClass = classifyPage(html, finalUrl);
+  logger.info(`[Extractor] Page class: ${pageClass}`);
+
+  if (pageClass !== 'ok') {
+    logger.warn(`[Extractor] ✖ "${pageClass}" on ${label} — saving debug HTML`);
+    saveDebugHtml(html, label);
+    antiBot.record(pageClass);
+    return { urls: null, pageClass };
+  }
+
+  const urls = extractAsinsFromHtml(html);
+  logger.info(`[Extractor] ${label}: extracted ${urls.length} ASINs`);
+  antiBot.record('ok');
+
+  return { urls, pageClass };
 }
 
-// ── Category extractor ────────────────────────────────────────────────────────
+// ── Category extractor ─────────────────────────────────────────────────────────
 
 async function extractLinksFromCategory(category, buildPageUrl) {
-  const links = new Set();
-  let emptyStreak = 0, blockedCount = 0;
+  const links      = new Set();
+  let emptyStreak  = 0;
+  let blockedCount = 0;
 
+  // Randomise start page so repeated cycles don't always hit page 1 first
   const start = category.maxPages > 1
     ? 1 + Math.floor(Math.random() * Math.max(1, category.maxPages - 1))
     : 1;
@@ -346,27 +259,22 @@ async function extractLinksFromCategory(category, buildPageUrl) {
   for (let i = 1;     i < start;             i++) pageOrder.push(i);
 
   for (const pageNum of pageOrder) {
-    // ── Global hourly page budget ─────────────────────────────────────────────
+    // ── Hourly page budget ──────────────────────────────────────────────────
     if (!antiBot.budgetOk()) {
-      logger.warn(
-        `[Extractor] Hourly page budget exhausted (${antiBot.budgetRemaining()} left) — ` +
-        `stopping "${category.name}"`
-      );
+      logger.warn(`[Extractor] Hourly budget exhausted — stopping "${category.name}"`);
       break;
     }
     antiBot.consumeBudget();
 
-    const url                        = buildPageUrl(category, pageNum);
-    const { urls: result, pageClass } = await extractOnePage(url, category.name, pageNum);
+    const url = buildPageUrl(category, pageNum);
+    const { urls: result, pageClass } = await fetchCategoryPage(url, category.name, pageNum);
 
-    // ── Record detection signal ───────────────────────────────────────────────
-    antiBot.record(pageClass);
-
-    // ── Bot-wall / CAPTCHA: blacklist + long cooldown ─────────────────────────
-    if (pageClass === 'bot-wall' || pageClass === 'captcha') {
+    // ── Bot detection → blacklist + cycle abort ─────────────────────────────
+    if (['bot-wall', 'captcha', 'homepage-redirect'].includes(pageClass)) {
       antiBot.blacklistCategory(category.id);
+      antiBot.setBotWallThisCycle();
       if (antiBot.shouldSleepForBotWall()) {
-        const cooldownMs = (10 + Math.floor(Math.random() * 10)) * 60_000;  // 10–20 min
+        const cooldownMs = (10 + Math.floor(Math.random() * 10)) * 60_000;
         logger.warn(
           `[Extractor] ⚠ ${pageClass.toUpperCase()} on "${category.name}" — ` +
           `cooling down ${Math.round(cooldownMs / 60_000)} min`
@@ -376,7 +284,7 @@ async function extractLinksFromCategory(category, buildPageUrl) {
       break;
     }
 
-    if (result === null) {
+    if (pageClass === 'wrong-layout' || result === null) {
       blockedCount++;
       if (blockedCount >= 2) {
         logger.warn(`[Extractor] ${category.name}: 2 consecutive failures — aborting`);
@@ -400,9 +308,11 @@ async function extractLinksFromCategory(category, buildPageUrl) {
   return [...links];
 }
 
-// ── Cycle warm-up — builds session trust before each crawl cycle ─────────────
-// Visits a non-category Amazon page + performs a fake search so the browser
-// session looks like a human shopper, not a direct search-result hammerer.
+// ── Cycle warm-up — builds Puppeteer session trust for PRODUCT scraping ────────
+// This warm-up is for the Puppeteer browser session used by the product scraper
+// (src/scraper/amazon.js), NOT for category extraction (which uses axios).
+// Visiting Amazon pages via the persistent Chrome profile builds cookies and
+// behavioral trust so product detail page scraping is less likely to be flagged.
 
 const WARM_UP_BROWSE_PAGES = [
   'https://www.amazon.in/gp/new-releases/electronics/',
@@ -414,44 +324,57 @@ const WARM_UP_BROWSE_PAGES = [
 
 const WARM_UP_SEARCH_URLS = [
   'https://www.amazon.in/s?k=wireless+earphones+under+1000',
-  'https://www.amazon.in/s?k=running+shoes+men+size+9',
-  'https://www.amazon.in/s?k=face+wash+women+skincare',
+  'https://www.amazon.in/s?k=running+shoes+men',
+  'https://www.amazon.in/s?k=face+wash+skincare',
   'https://www.amazon.in/s?k=smartwatch+under+5000',
-  'https://www.amazon.in/s?k=gym+gloves+fitness+equipment',
-  'https://www.amazon.in/s?k=laptop+backpack+college',
+  'https://www.amazon.in/s?k=gym+fitness+equipment',
+  'https://www.amazon.in/s?k=laptop+backpack',
 ];
 
-async function cycleWarmUp() {
-  logger.info('[AntiBot] Cycle warm-up starting — building session trust…');
+async function _simulateHuman(page) {
+  const moves = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < moves; i++) {
+    await page.mouse.move(
+      150 + Math.floor(Math.random() * 900),
+      80  + Math.floor(Math.random() * 500),
+      { steps: 8 + Math.floor(Math.random() * 8) }
+    );
+    await sleep(100 + Math.floor(Math.random() * 300));
+  }
+}
 
-  // Step 1: Browse a stable Amazon landing page (new-releases / bestsellers)
+async function cycleWarmUp() {
+  logger.info('[AntiBot] Cycle warm-up starting — building Puppeteer session trust for product scraping…');
+
+  // Step 1: Browse a stable Amazon landing page
   const browseUrl = WARM_UP_BROWSE_PAGES[Math.floor(Math.random() * WARM_UP_BROWSE_PAGES.length)];
   let page = null;
   try {
     page = await openPage({ blockAssets: false });
     await page.goto(browseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await sleep(1500 + Math.floor(Math.random() * 2000));
-    await simulateHuman(page);
+    await sleep(1200 + Math.floor(Math.random() * 1800));
+    await _simulateHuman(page);
     const scrollH = await page.evaluate(() => document.body.scrollHeight).catch(() => 2000);
-    await smoothScrollTo(page, Math.floor(scrollH * (0.25 + Math.random() * 0.2)));
-    await sleep(800 + Math.floor(Math.random() * 1200));
+    await smoothScroll(page, Math.floor(scrollH * (0.2 + Math.random() * 0.2)));
+    await sleep(600 + Math.floor(Math.random() * 800));
+    logger.info(`[AntiBot] Warm-up: browse ${browseUrl}`);
   } catch (e) {
     logger.debug(`[AntiBot] Warm-up browse non-fatal: ${e.message}`);
   } finally {
     if (page) { await page.close().catch(() => {}); page = null; }
   }
 
-  await sleep(1000 + Math.floor(Math.random() * 1500));
+  await sleep(800 + Math.floor(Math.random() * 1200));
 
-  // Step 2: Perform a generic search — mimics user looking for products
+  // Step 2: Perform a generic search
   const searchUrl = WARM_UP_SEARCH_URLS[Math.floor(Math.random() * WARM_UP_SEARCH_URLS.length)];
   try {
     page = await openPage({ blockAssets: 'media' });
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await sleep(1200 + Math.floor(Math.random() * 1800));
-    await simulateHuman(page);
-    await sleep(600 + Math.floor(Math.random() * 800));
-    logger.info(`[AntiBot] Warm-up search: ${searchUrl.split('?k=')[1] || searchUrl}`);
+    await sleep(1000 + Math.floor(Math.random() * 1500));
+    await _simulateHuman(page);
+    await sleep(500 + Math.floor(Math.random() * 600));
+    logger.info(`[AntiBot] Warm-up: search "${searchUrl.split('?k=')[1] || searchUrl}"`);
   } catch (e) {
     logger.debug(`[AntiBot] Warm-up search non-fatal: ${e.message}`);
   } finally {

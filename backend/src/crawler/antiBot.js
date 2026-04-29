@@ -21,18 +21,25 @@ const _hourBucket = { count: 0, resetAt: Date.now() + 3_600_000 };
 
 // ── Detection metrics (process-lifetime rolling counts) ───────────────────────
 const stats = {
-  okPages:     0,
-  wrongLayout: 0,
-  botWall:     0,
-  captcha:     0,
-  api400:      0,
-  blocked:     0,   // all other non-ok classes (ssl, network-error, exception…)
+  okPages:           0,
+  wrongLayout:       0,
+  homepageRedirect:  0,
+  botWall:           0,
+  captcha:           0,
+  api400:            0,
+  blocked:           0,   // all other non-ok classes (ssl, network-error, exception…)
 };
 
 // ── Bot-wall sleep dedup ──────────────────────────────────────────────────────
 // Prevents sleeping 10-20 min multiple times in the same detection window.
-// A new sleep is allowed only after 25 min have passed since the last one.
+// A new sleep is allowed only after 45 min have passed since the last one.
 let _lastBotWallSleepAt = 0;
+
+// ── Per-cycle bot-wall flag ───────────────────────────────────────────────────
+// Set true the moment a bot-wall is detected in the current cycle.
+// The crawler checks this after each category and aborts the rest of the cycle,
+// so the session gets a full rest + warm-up before trying any more categories.
+let _botWallThisCycle = false;
 
 // ── Blacklist API ─────────────────────────────────────────────────────────────
 
@@ -45,8 +52,8 @@ function isBlacklisted(categoryId) {
 }
 
 function blacklistCategory(categoryId, durationMs) {
-  // Default: 60–120 min, randomised to avoid predictable retry patterns
-  const ms = durationMs ?? (60 + Math.floor(Math.random() * 60)) * 60_000;
+  // Default: 90–180 min, randomised to avoid predictable retry patterns
+  const ms = durationMs ?? (90 + Math.floor(Math.random() * 90)) * 60_000;
   _blacklist.set(categoryId, Date.now() + ms);
   logger.warn(`[AntiBot] Category "${categoryId}" blacklisted for ${Math.round(ms / 60_000)} min`);
 }
@@ -80,20 +87,42 @@ function budgetRemaining() {
 
 function record(pageClass) {
   switch (pageClass) {
-    case 'ok':           stats.okPages++;     break;
-    case 'wrong-layout': stats.wrongLayout++; break;
-    case 'bot-wall':     stats.botWall++;     break;
-    case 'captcha':      stats.captcha++;     break;
-    case 'api-400':      stats.api400++;      break;
-    default:             stats.blocked++;     break;
+    case 'ok':                stats.okPages++;           break;
+    case 'wrong-layout':      stats.wrongLayout++;       break;
+    case 'homepage-redirect': stats.homepageRedirect++;  break;
+    case 'bot-wall':          stats.botWall++;           break;
+    case 'captcha':           stats.captcha++;           break;
+    case 'api-400':           stats.api400++;            break;
+    default:                  stats.blocked++;           break;
   }
+}
+
+// ── Per-cycle bot-wall helpers ────────────────────────────────────────────────
+
+/** Called at the START of every crawl cycle to reset the per-cycle flag. */
+function resetCycleState() {
+  _botWallThisCycle = false;
+}
+
+/** Called by extractor when a bot-wall / captcha is detected on any page. */
+function setBotWallThisCycle() {
+  _botWallThisCycle = true;
+}
+
+/**
+ * Returns true if a bot-wall was hit during the current cycle.
+ * The crawler uses this to abort the category loop so the compromised session
+ * gets a full rest + warm-up before any more categories are attempted.
+ */
+function isBotWallThisCycle() {
+  return _botWallThisCycle;
 }
 
 // ── Bot-wall sleep dedup ──────────────────────────────────────────────────────
 
 function shouldSleepForBotWall() {
   const now = Date.now();
-  if (now - _lastBotWallSleepAt < 25 * 60_000) {
+  if (now - _lastBotWallSleepAt < 45 * 60_000) {
     logger.warn('[AntiBot] Bot-wall detected but already slept recently — skipping cooldown');
     return false;
   }
@@ -105,12 +134,12 @@ function shouldSleepForBotWall() {
 
 function logStats() {
   const total      = Object.values(stats).reduce((s, v) => s + v, 0);
-  const detections = stats.botWall + stats.captcha;
+  const detections = stats.wrongLayout + stats.homepageRedirect + stats.botWall + stats.captcha;
   const rate       = total ? (detections / total * 100).toFixed(1) : '0.0';
   logger.info(
     `[AntiBot] pages=${total} ok=${stats.okPages} wrong-layout=${stats.wrongLayout} ` +
-    `bot-wall=${stats.botWall} captcha=${stats.captcha} api-400=${stats.api400} ` +
-    `other-blocked=${stats.blocked} | detection-rate=${rate}% | ` +
+    `homepage-redirect=${stats.homepageRedirect} bot-wall=${stats.botWall} captcha=${stats.captcha} ` +
+    `api-400=${stats.api400} other-blocked=${stats.blocked} | detection-rate=${rate}% | ` +
     `budget=${_hourBucket.count}/${MAX_PAGES_PER_HOUR}/hr`
   );
 }
@@ -119,4 +148,5 @@ module.exports = {
   isBlacklisted, blacklistCategory, getBlacklisted,
   budgetOk, consumeBudget, budgetRemaining,
   record, shouldSleepForBotWall, logStats, stats,
+  resetCycleState, setBotWallThisCycle, isBotWallThisCycle,
 };
