@@ -7,8 +7,8 @@ export default function SmartDealsPage() {
   return (
     <div className="p-4 lg:p-8 min-h-screen bg-transparent">
       <SmartDealsFeed 
-        title="Smart Deal Discovery" 
-        subtitle="Our AI engine scans thousands of products to find real price drops and historical lows."
+        title="Amazon Best Deals" 
+        subtitle="AI-powered discovery of price drops, historical lows, and secret Amazon discounts across all categories."
         showTrendingSection={true}
         showLowestEverSection={true}
       />

@@ -82,7 +82,7 @@ export default function SmartDealsSlugPage() {
   return (
     <div className="p-4 lg:p-8 min-h-screen">
       <div className="max-w-7xl mx-auto mb-6 flex items-center gap-3">
-        <div className="p-3 bg-orange-500/10 rounded-2xl text-orange-400">
+        <div className="p-3 bg-orange-500/10 rounded-2xl text-orange-400 border border-orange-500/20">
           <Icon size={24} />
         </div>
         <div className="h-px flex-grow bg-gradient-to-r from-orange-500/20 to-transparent" />
@@ -92,6 +92,8 @@ export default function SmartDealsSlugPage() {
         title={config.title}
         subtitle={config.subtitle}
         initialFilters={config.filters}
+        showTrendingSection={slug === 'trending'}
+        showLowestEverSection={slug === 'lowest-price'}
       />
     </div>
   );

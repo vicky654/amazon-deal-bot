@@ -53,8 +53,23 @@ export const dealsApi = {
     return request('/api/deals/trending');
   },
 
+  lightning() {
+    return request('/api/deals/lightning');
+  },
+
+  recentDrops() {
+    return request('/api/deals/recent-drops');
+  },
+
   lowestEver() {
     return request('/api/deals/lowest-ever');
+  },
+
+  explore(params = {}) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)])
+    ).toString();
+    return request(`/api/deals/explore${qs ? `?${qs}` : ''}`);
   },
 
   history(asin) {

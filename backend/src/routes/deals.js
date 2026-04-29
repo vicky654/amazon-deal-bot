@@ -138,10 +138,98 @@ router.get('/trending', async (req, res, next) => {
   }
 });
 
+// GET /api/deals/explore — Advanced paginated discovery
+router.get('/explore', async (req, res, next) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 20, 
+      category, 
+      minScore, 
+      isVerified, 
+      isLowestEver, 
+      isPrime, 
+      inStock, 
+      sort = 'newest',
+      q
+    } = req.query;
+
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+    const filter = {};
+
+    if (category) filter.category = category;
+    if (minScore) filter.dealScore = { $gte: parseInt(minScore, 10) };
+    if (isVerified === 'true') filter.isVerifiedDeal = true;
+    if (isPrime === 'true') filter.isPrime = true;
+    if (inStock === 'true') filter.inStock = true;
+    if (isLowestEver === 'true') {
+      filter.$expr = { $lte: ['$price', '$lowestPrice'] };
+    }
+
+    if (q) {
+      filter.$or = [
+        { title: { $regex: q, $options: 'i' } },
+        { brand: { $regex: q, $options: 'i' } },
+        { asin: q.toUpperCase() }
+      ];
+    }
+
+    let sortBy = { createdAt: -1 };
+    if (sort === 'score') sortBy = { dealScore: -1 };
+    if (sort === 'discount') sortBy = { discount: -1 };
+    if (sort === 'price_asc') sortBy = { price: 1 };
+    if (sort === 'drop') sortBy = { priceDrop: -1 };
+
+    const [deals, total] = await Promise.all([
+      Deal.find(filter).sort(sortBy).skip(skip).limit(parseInt(limit, 10)).lean(),
+      Deal.countDocuments(filter)
+    ]);
+
+    res.json({ 
+      success: true, 
+      deals, 
+      total, 
+      page: parseInt(page, 10), 
+      pages: Math.ceil(total / parseInt(limit, 10)) 
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/deals/lightning — Amazon Lightning deals
+router.get('/lightning', async (req, res, next) => {
+  try {
+    const deals = await Deal.find({ isLightningDeal: true })
+      .sort({ dealScore: -1, createdAt: -1 })
+      .limit(20)
+      .lean();
+    res.json({ success: true, deals });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/deals/recent-drops — Major price drops in last 24h
+router.get('/recent-drops', async (req, res, next) => {
+  try {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const deals = await Deal.find({ 
+      updatedAt: { $gte: twentyFourHoursAgo },
+      discount: { $gte: 30 } // Only show significant drops
+    })
+    .sort({ discount: -1 })
+    .limit(20)
+    .lean();
+    res.json({ success: true, deals });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/deals/lowest-ever — Deals that hit their historical low
 router.get('/lowest-ever', async (req, res, next) => {
   try {
-    // We can find deals where price <= lowestPrice
     const deals = await Deal.find({
       $expr: { $lte: ['$price', '$lowestPrice'] },
       lowestPrice: { $exists: true, $ne: null }
