@@ -65,31 +65,31 @@ export default function SmartExplorer() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50/50 p-4 lg:p-8">
+    <div className="min-h-screen bg-background p-4 lg:p-8 animate-fade-in">
       
       {/* Header Section */}
       <div className="max-w-7xl mx-auto mb-10">
         <div className="flex flex-col md:flex-row justify-between items-end gap-6 mb-8">
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-primary-foreground shadow-lg shadow-primary/20">
                 <Search size={22} />
               </div>
-              <h1 className="text-3xl font-black text-gray-900 tracking-tight">Smart Deal Finder</h1>
+              <h1 className="text-3xl font-black text-foreground tracking-tight">Smart Deal Finder</h1>
             </div>
-            <p className="text-gray-500 font-medium">Discover real discounts using historical pricing and AI analysis.</p>
+            <p className="text-muted-foreground font-medium">Discover real discounts using historical pricing and AI analysis.</p>
           </div>
           
-          <div className="flex bg-white p-1 rounded-xl border border-gray-100 shadow-sm">
+          <div className="flex bg-surface p-1 rounded-xl border border-border shadow-sm">
             <button 
               onClick={() => setViewMode('grid')}
-              className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-foreground text-background shadow-md' : 'text-muted-foreground hover:bg-accent'}`}
             >
               <LayoutGrid size={20} />
             </button>
             <button 
               onClick={() => setViewMode('list')}
-              className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-foreground text-background shadow-md' : 'text-muted-foreground hover:bg-accent'}`}
             >
               <List size={20} />
             </button>
@@ -100,13 +100,13 @@ export default function SmartExplorer() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
           
           {/* Trending Hot Deals */}
-          <div className="bg-orange-50/30 rounded-3xl p-6 border border-orange-100/50 relative overflow-hidden">
+          <div className="bg-primary/5 rounded-3xl p-6 border border-primary/10 relative overflow-hidden">
             <div className="flex items-center justify-between mb-6 relative z-10">
               <div className="flex items-center gap-2">
-                <Flame className="text-orange-500" fill="currentColor" size={24} />
-                <h2 className="text-xl font-black text-orange-900">Trending Hot Deals</h2>
+                <Flame className="text-primary" fill="currentColor" size={24} />
+                <h2 className="text-xl font-black text-foreground">Trending Hot Deals</h2>
               </div>
-              <button className="text-xs font-bold text-orange-600 bg-white px-3 py-1.5 rounded-full shadow-sm hover:shadow-md transition-all">View All</button>
+              <button className="text-xs font-bold text-primary bg-surface px-3 py-1.5 rounded-full shadow-sm hover:shadow-md transition-all border border-border">View All</button>
             </div>
             
             <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide snap-x">
@@ -119,19 +119,19 @@ export default function SmartExplorer() {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-orange-400 font-bold py-10 w-full text-center">No trending deals found yet.</p>
+                <p className="text-sm text-primary font-bold py-10 w-full text-center">No trending deals found yet.</p>
               )}
             </div>
           </div>
 
           {/* Lowest Price Ever */}
-          <div className="bg-indigo-50/30 rounded-3xl p-6 border border-indigo-100/50 relative overflow-hidden">
+          <div className="bg-blue-500/5 rounded-3xl p-6 border border-blue-500/10 relative overflow-hidden">
             <div className="flex items-center justify-between mb-6 relative z-10">
               <div className="flex items-center gap-2">
-                <TrendingDown className="text-indigo-500" size={24} />
-                <h2 className="text-xl font-black text-indigo-900">Lowest Price Ever</h2>
+                <TrendingDown className="text-blue-500" size={24} />
+                <h2 className="text-xl font-black text-foreground">Lowest Price Ever</h2>
               </div>
-              <button className="text-xs font-bold text-indigo-600 bg-white px-3 py-1.5 rounded-full shadow-sm hover:shadow-md transition-all">View All</button>
+              <button className="text-xs font-bold text-blue-600 bg-surface px-3 py-1.5 rounded-full shadow-sm hover:shadow-md transition-all border border-border">View All</button>
             </div>
 
             <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide snap-x">
@@ -144,7 +144,7 @@ export default function SmartExplorer() {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-indigo-400 font-bold py-10 w-full text-center">No lowest-ever prices detected yet.</p>
+                <p className="text-sm text-blue-400 font-bold py-10 w-full text-center">No lowest-ever prices detected yet.</p>
               )}
             </div>
           </div>
@@ -157,9 +157,9 @@ export default function SmartExplorer() {
         {/* Main Feed */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="text-blue-600" size={20} />
-            <h2 className="text-xl font-black text-gray-900">Deal Explorer</h2>
-            <span className="bg-gray-100 text-gray-500 text-[10px] font-bold px-2 py-0.5 rounded-full ml-2">
+            <CheckCircle2 className="text-primary" size={20} />
+            <h2 className="text-xl font-black text-foreground">Deal Explorer</h2>
+            <span className="bg-accent text-muted-foreground text-[10px] font-bold px-2 py-0.5 rounded-full ml-2">
               {deals.length} RESULTS
             </span>
           </div>
@@ -167,7 +167,7 @@ export default function SmartExplorer() {
           <button 
             onClick={handleSearch}
             disabled={refreshing}
-            className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-blue-600 transition-all"
+            className="flex items-center gap-2 text-sm font-bold text-muted-foreground hover:text-primary transition-all"
           >
             <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
             Refresh Feed
@@ -185,12 +185,12 @@ export default function SmartExplorer() {
             ))}
           </div>
         ) : (
-          <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
-            <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Search className="text-gray-300" size={40} />
+          <div className="text-center py-20 bg-surface rounded-3xl border border-dashed border-border shadow-sm">
+            <div className="w-20 h-20 bg-accent rounded-full flex items-center justify-center mx-auto mb-4">
+              <Search className="text-muted-foreground" size={40} />
             </div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">No deals found matching filters</h3>
-            <p className="text-gray-400 text-sm max-w-xs mx-auto">Try adjusting your filters or keyword to find what you're looking for.</p>
+            <h3 className="text-lg font-bold text-foreground mb-2">No deals found matching filters</h3>
+            <p className="text-muted-foreground text-sm max-w-xs mx-auto">Try adjusting your filters or keyword to find what you're looking for.</p>
           </div>
         )}
 

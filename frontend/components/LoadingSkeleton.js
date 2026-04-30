@@ -1,10 +1,11 @@
 'use client';
 
+import { RefreshCw } from 'lucide-react';
+
 export default function LoadingSkeleton() {
   return (
     <div
-      className="rounded-2xl p-5 sm:p-6"
-      style={{ background: 'rgba(15,23,42,0.90)', border: '1px solid rgba(255,255,255,0.07)' }}
+      className="rounded-2xl p-5 sm:p-6 bg-card border border-border shadow-sm animate-pulse"
     >
       {/* Header */}
       <div className="flex items-center gap-2 mb-5">
@@ -42,14 +43,10 @@ export default function LoadingSkeleton() {
 
       {/* Footer */}
       <div
-        className="mt-5 pt-4 flex items-center gap-2"
-        style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
+        className="mt-5 pt-4 flex items-center gap-2 border-t border-border"
       >
-        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" style={{ color: '#f97316' }}>
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-        <p className="text-xs text-slate-600">Scraping product — 10–30 seconds…</p>
+        <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+        <p className="text-xs text-muted-foreground">Scraping product — 10–30 seconds…</p>
       </div>
     </div>
   );

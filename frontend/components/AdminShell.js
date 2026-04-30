@@ -45,7 +45,7 @@ export default function AdminShell({ children }) {
   return (
     <ToastProvider>
     <CrawlerProvider>
-    <div className="h-screen flex overflow-hidden bg-slate-950">
+    <div className="h-screen flex overflow-hidden bg-background text-foreground">
 
       {/* ── Sidebar ── */}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -55,13 +55,7 @@ export default function AdminShell({ children }) {
 
         {/* ── Header ── */}
         <header
-          className="shrink-0 sticky top-0 z-20 safe-top"
-          style={{
-            background: 'rgba(2, 6, 23, 0.85)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            borderBottom: '1px solid rgba(255,255,255,0.06)',
-          }}
+          className="shrink-0 sticky top-0 z-20 safe-top bg-surface/80 backdrop-blur-xl border-b border-border"
         >
           <div className="w-full max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
 
@@ -70,7 +64,7 @@ export default function AdminShell({ children }) {
               <button
                 type="button"
                 onClick={() => setSidebarOpen((v) => !v)}
-                className="lg:hidden p-2 -ml-1 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition touch-manipulation"
+                className="lg:hidden p-2 -ml-1 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent transition touch-manipulation"
                 aria-label="Toggle menu"
               >
                 {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -78,15 +72,14 @@ export default function AdminShell({ children }) {
 
               {/* Desktop: logo link */}
               <Link href="/admin" className="hidden lg:flex items-center gap-2.5 shrink-0">
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center text-sm"
-                  style={{ background: 'linear-gradient(135deg,#f97316,#ea580c)' }}>
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center text-sm shadow-sm bg-primary text-primary-foreground">
                   🔥
                 </div>
-                <span className="text-sm font-bold text-white">DealBot</span>
+                <span className="text-sm font-bold text-foreground">DealBot</span>
               </Link>
 
               {/* Mobile: page title */}
-              <h1 className="lg:hidden text-base font-bold text-white truncate">{title}</h1>
+              <h1 className="lg:hidden text-base font-bold text-foreground truncate">{title}</h1>
             </div>
 
             {/* Right: status pill + logout */}
@@ -107,7 +100,7 @@ export default function AdminShell({ children }) {
               <button
                 onClick={handleLogout}
                 title="Logout"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-muted-foreground hover:text-danger hover:bg-danger/10 transition touch-manipulation"
               >
                 <LogOut className="w-4 h-4" />
                 <span className="hidden sm:inline">Logout</span>

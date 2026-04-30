@@ -3,6 +3,83 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 222 47% 11%;
+    --surface: 0 0% 100%;
+    --surface-hover: 210 40% 96%;
+    --border: 214 32% 91%;
+    --border-strong: 214 32% 80%;
+    
+    --primary: 24 98% 50%;
+    --primary-foreground: 210 40% 98%;
+    --primary-hover: 24 98% 45%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --secondary-hover: 210 40% 90%;
+    
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --danger: 348 83% 47%;
+    --danger-foreground: 0 0% 100%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --radius: 0.75rem;
+    --shadow-color: 220 3% 15%;
+  }
+
+  .dark {
+    --background: 222 47% 7%;
+    --foreground: 210 40% 98%;
+    --surface: 222 47% 11%;
+    --surface-hover: 217 33% 17%;
+    --border: 217 33% 17%;
+    --border-strong: 217 33% 25%;
+    
+    --primary: 24 98% 50%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 24 98% 45%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --secondary-hover: 215 28% 22%;
+
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --danger: 348 83% 47%;
+    --danger-foreground: 0 0% 100%;
+
+    --card: 222 47% 9%;
+    --card-foreground: 210 40% 98%;
+    
+    --shadow-color: 0 0% 0%;
+  }
+}
+
+@layer base {
   html {
     overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
@@ -14,7 +91,8 @@
   body {
     overflow-x: hidden;
     width: 100%;
-    @apply bg-slate-950 text-slate-100;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
   }
 
   * { box-sizing: border-box; }
@@ -46,13 +124,13 @@
     overflow: hidden;
   }
 
-  /* ── Skeleton shimmer (dark mode) ── */
+  /* ── Skeleton shimmer ── */
   @keyframes shimmer {
     0%   { background-position: -400px 0; }
     100% { background-position:  400px 0; }
   }
   .skeleton {
-    background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+    background: linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--accent)) 50%, hsl(var(--muted)) 75%);
     background-size: 800px 100%;
     animation: shimmer 1.4s ease-in-out infinite;
   }
@@ -91,16 +169,16 @@
   .stagger-children > *:nth-child(5) { animation-delay: 0.25s; }
 
   /* ── Glow effects ── */
-  .glow-orange { box-shadow: 0 0 20px rgba(249,115,22,0.25); }
-  .glow-emerald { box-shadow: 0 0 20px rgba(52,211,153,0.20); }
-  .glow-blue { box-shadow: 0 0 20px rgba(96,165,250,0.20); }
+  .glow-primary { box-shadow: 0 0 20px hsla(var(--primary), 0.25); }
+  .glow-success { box-shadow: 0 0 20px hsla(var(--success), 0.20); }
+  .glow-danger { box-shadow: 0 0 20px hsla(var(--danger), 0.20); }
 
   /* ── Glass card ── */
   .glass {
-    background: rgba(15, 23, 42, 0.7);
+    background: hsla(var(--surface), 0.7);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255,255,255,0.06);
+    border: 1px solid hsla(var(--foreground), 0.06);
   }
 
   /* ── Safe-area ── */

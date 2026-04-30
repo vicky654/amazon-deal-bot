@@ -145,8 +145,8 @@ export default function CrawlerControlPage() {
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-xl border backdrop-blur-sm flex items-center gap-3 animate-fade-in ${
           toast.type === 'error' 
-            ? 'bg-red-500/10 border-red-500/30 text-red-400' 
-            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+            ? 'bg-danger/10 border-danger/30 text-danger' 
+            : 'bg-success/10 border-success/30 text-success'
         }`}>
           {toast.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
           <span className="text-sm font-medium">{toast.message}</span>
@@ -154,26 +154,26 @@ export default function CrawlerControlPage() {
       )}
 
       {/* Header & Controls */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/50 border border-slate-800 p-6 rounded-2xl backdrop-blur-sm">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-surface/80 border border-border p-6 rounded-2xl backdrop-blur-sm">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <Activity className="text-indigo-400 w-7 h-7" />
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-3">
+            <Activity className="text-primary w-7 h-7" />
             Crawler Engine
           </h1>
-          <p className="text-slate-400 mt-1 text-sm">Remote control and monitoring for the production crawler</p>
+          <p className="text-muted-foreground mt-1 text-sm">Remote control and monitoring for the production crawler</p>
         </div>
         
         <div className="flex items-center gap-4">
           {getStatusBadge()}
           
-          <div className="flex items-center gap-2 bg-slate-900 rounded-xl p-1 border border-slate-800">
+          <div className="flex items-center gap-2 bg-background rounded-xl p-1 border border-border">
             <button
               onClick={() => handleAction('start')}
               disabled={isActionDisabled('start')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 isActionDisabled('start') 
-                  ? 'opacity-50 cursor-not-allowed text-slate-500' 
-                  : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                  ? 'opacity-50 cursor-not-allowed text-muted-foreground' 
+                  : 'bg-success/10 text-success hover:bg-success/20'
               }`}
             >
               {actionLoading === 'start' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
@@ -184,8 +184,8 @@ export default function CrawlerControlPage() {
               disabled={isActionDisabled('stop')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 isActionDisabled('stop') 
-                  ? 'opacity-50 cursor-not-allowed text-slate-500' 
-                  : 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+                  ? 'opacity-50 cursor-not-allowed text-muted-foreground' 
+                  : 'bg-danger/10 text-danger hover:bg-danger/20'
               }`}
             >
               {actionLoading === 'stop' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Square className="w-4 h-4" />}
@@ -196,8 +196,8 @@ export default function CrawlerControlPage() {
               disabled={isActionDisabled('restart') || !status?.running}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 isActionDisabled('restart') || !status?.running
-                  ? 'opacity-50 cursor-not-allowed text-slate-500' 
-                  : 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
+                  ? 'opacity-50 cursor-not-allowed text-muted-foreground' 
+                  : 'bg-warning/10 text-warning hover:bg-warning/20'
               }`}
             >
               <RefreshCw className={`w-4 h-4 ${actionLoading === 'restart' ? 'animate-spin' : ''}`} />
@@ -220,38 +220,38 @@ export default function CrawlerControlPage() {
       </div>
 
       {/* Live Logs Viewer */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col h-[500px]">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/50">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
-            <Activity className="w-4 h-4 text-slate-400" />
+      <div className="bg-background border border-border rounded-2xl overflow-hidden flex flex-col h-[500px]">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-surface/50">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <Activity className="w-4 h-4 text-primary" />
             Live Logs Stream
-            <span className="text-[10px] text-slate-500 ml-2 bg-slate-800 px-2 py-0.5 rounded-full">Auto-refresh</span>
+            <span className="text-[10px] text-muted-foreground ml-2 bg-accent px-2 py-0.5 rounded-full">Auto-refresh</span>
           </div>
           <button 
             onClick={clearLogs}
-            className="text-slate-500 hover:text-red-400 transition-colors p-1"
+            className="text-muted-foreground hover:text-danger transition-colors p-1"
             title="Clear Logs"
           >
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-[13px] scrollbar-thin scrollbar-thumb-slate-700">
+        <div className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-[13px] scrollbar-thin scrollbar-thumb-border">
           {logs.length === 0 ? (
-            <div className="text-slate-600 italic">No logs available...</div>
+            <div className="text-muted-foreground italic">No logs available...</div>
           ) : (
             // Reverse so newest logs are at the bottom for auto-scroll
             [...logs].reverse().map((log, idx) => {
               const level = log.level || 'info';
               const levelColors = {
-                info: 'text-slate-300',
-                warn: 'text-yellow-400',
-                error: 'text-red-400 font-medium'
+                info: 'text-foreground/90',
+                warn: 'text-warning font-medium',
+                error: 'text-danger font-bold'
               };
 
               return (
-                <div key={idx} className={`flex gap-3 hover:bg-slate-800/50 px-2 py-1 rounded ${levelColors[level]}`}>
-                  <span className="text-slate-600 shrink-0 select-none">
+                <div key={idx} className={`flex gap-3 hover:bg-accent px-2 py-1 rounded ${levelColors[level]}`}>
+                  <span className="text-muted-foreground shrink-0 select-none">
                     [{new Date(log.timestamp).toLocaleTimeString()}]
                   </span>
                   <span className="break-all whitespace-pre-wrap">{log.message}</span>
@@ -268,13 +268,13 @@ export default function CrawlerControlPage() {
 
 function StatCard({ icon, label, value }) {
   return (
-    <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex items-start gap-4">
-      <div className="p-2.5 bg-slate-800 rounded-lg shrink-0">
+    <div className="bg-surface/80 border border-border rounded-xl p-4 flex items-start gap-4">
+      <div className="p-2.5 bg-accent rounded-lg shrink-0">
         {icon}
       </div>
       <div className="min-w-0">
-        <p className="text-xs text-slate-400 font-medium truncate">{label}</p>
-        <p className="text-lg font-semibold text-white truncate mt-0.5">{value}</p>
+        <p className="text-xs text-muted-foreground font-medium truncate">{label}</p>
+        <p className="text-lg font-semibold text-foreground truncate mt-0.5">{value}</p>
       </div>
     </div>
   );

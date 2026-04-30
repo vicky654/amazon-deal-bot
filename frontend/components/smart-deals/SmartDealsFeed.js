@@ -142,36 +142,36 @@ const SmartDealsFeed = ({
           animate={{ opacity: 1, x: 0 }}
         >
           <div className="flex flex-wrap items-center gap-3 mb-3">
-            <h1 className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-none">{title}</h1>
+            <h1 className="text-4xl sm:text-5xl font-black text-foreground tracking-tight leading-none">{title}</h1>
             <AnimatePresence>
               {crawlerStatus?.running && (
                 <motion.span 
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                   exit={{ scale: 0 }}
-                  className="flex items-center gap-2 px-3 py-1 bg-orange-500/10 text-orange-400 text-[10px] font-black rounded-full border border-orange-500/20 shadow-lg shadow-orange-500/5"
+                  className="flex items-center gap-2 px-3 py-1 bg-primary/10 text-primary text-[10px] font-black rounded-full border border-primary/20 shadow-sm"
                 >
-                  <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shadow-[0_0_10px_rgba(249,115,22,1)]" />
+                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
                   LIVE ANALYSIS
                 </motion.span>
               )}
             </AnimatePresence>
           </div>
-          <p className="text-slate-500 font-bold text-lg max-w-xl leading-relaxed">{subtitle}</p>
+          <p className="text-muted-foreground font-bold text-lg max-w-xl leading-relaxed">{subtitle}</p>
         </motion.div>
         
-        <div className="flex items-center gap-3 bg-slate-900/50 p-1.5 rounded-[1.25rem] border border-white/5 shadow-2xl backdrop-blur-xl">
-          <div className="px-3 py-1.5 text-[10px] font-black text-slate-500 uppercase tracking-widest hidden sm:block">View Mode</div>
+        <div className="flex items-center gap-3 bg-surface/80 p-1.5 rounded-[1.25rem] border border-border shadow-sm backdrop-blur-xl">
+          <div className="px-3 py-1.5 text-[10px] font-black text-muted-foreground uppercase tracking-widest hidden sm:block">View Mode</div>
           <div className="flex gap-1">
             <button 
               onClick={() => setViewMode('grid')}
-              className={`p-2.5 rounded-xl transition-all ${viewMode === 'grid' ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`p-2.5 rounded-xl transition-all ${viewMode === 'grid' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
             >
               <LayoutGrid size={20} />
             </button>
             <button 
               onClick={() => setViewMode('list')}
-              className={`p-2.5 rounded-xl transition-all ${viewMode === 'list' ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`p-2.5 rounded-xl transition-all ${viewMode === 'list' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
             >
               <List size={20} />
             </button>
@@ -186,15 +186,15 @@ const SmartDealsFeed = ({
             <section>
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-orange-500/10 rounded-2xl flex items-center justify-center text-orange-500 border border-orange-500/20">
+                  <div className="w-10 h-10 bg-primary/10 rounded-2xl flex items-center justify-center text-primary border border-primary/20">
                     <Zap size={22} fill="currentColor" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-black text-white leading-none mb-1">Flash Trending</h2>
-                    <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Calculated from last 24h performance</p>
+                    <h2 className="text-xl font-black text-foreground leading-none mb-1">Flash Trending</h2>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Calculated from last 24h performance</p>
                   </div>
                 </div>
-                <button className="p-2 text-slate-600 hover:text-orange-400 transition-all">
+                <button className="p-2 text-muted-foreground hover:text-primary transition-all">
                   <ChevronRight size={24} />
                 </button>
               </div>
@@ -217,10 +217,10 @@ const SmartDealsFeed = ({
       {/* Results Meta */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 px-4 py-2 bg-slate-900 rounded-2xl border border-white/5">
-            <Filter className="text-orange-500" size={16} />
-            <h2 className="text-xs font-black text-white uppercase tracking-tight">Marketplace results</h2>
-            <span className="bg-slate-800 text-orange-400 text-[10px] font-black px-2 py-0.5 rounded-lg ml-2">
+          <div className="flex items-center gap-2 px-4 py-2 bg-surface rounded-2xl border border-border">
+            <Filter className="text-primary" size={16} />
+            <h2 className="text-xs font-black text-foreground uppercase tracking-tight">Marketplace results</h2>
+            <span className="bg-accent text-primary text-[10px] font-black px-2 py-0.5 rounded-lg ml-2">
               {total.toLocaleString()} PRODUCTS
             </span>
           </div>
@@ -229,7 +229,7 @@ const SmartDealsFeed = ({
         <button 
           onClick={() => fetchData(true)}
           disabled={refreshing}
-          className="flex items-center gap-2 text-[10px] font-black text-slate-600 hover:text-orange-400 transition-all uppercase tracking-[0.2em] group"
+          className="flex items-center gap-2 text-[10px] font-black text-muted-foreground hover:text-primary transition-all uppercase tracking-[0.2em] group"
         >
           <RefreshCw size={14} className={`${refreshing ? 'animate-spin' : ''} group-hover:rotate-180 transition-transform duration-500`} />
           Sync live feed
@@ -263,8 +263,8 @@ const SmartDealsFeed = ({
             {hasMore && (
               <div ref={loadMoreRef} className="col-span-full py-20 flex justify-center">
                 <div className="flex flex-col items-center gap-4">
-                  <RefreshCw className="animate-spin text-orange-500" size={32} />
-                  <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Scanning more Amazon deals...</p>
+                  <RefreshCw className="animate-spin text-primary" size={32} />
+                  <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Scanning more deals...</p>
                 </div>
               </div>
             )}
@@ -274,26 +274,26 @@ const SmartDealsFeed = ({
             key="empty"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="text-center py-32 bg-slate-900/20 rounded-[3rem] border border-dashed border-white/5 backdrop-blur-sm"
+            className="text-center py-32 bg-surface/50 rounded-[3rem] border border-dashed border-border backdrop-blur-sm"
           >
-            <div className="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-8 border border-white/5 shadow-2xl">
-              <PackageSearch className="text-slate-700" size={48} />
+            <div className="w-24 h-24 bg-surface rounded-full flex items-center justify-center mx-auto mb-8 border border-border shadow-sm">
+              <PackageSearch className="text-muted-foreground" size={48} />
             </div>
-            <h3 className="text-2xl font-black text-white mb-3">No matching discoveries found</h3>
-            <p className="text-slate-500 font-bold text-sm max-w-sm mx-auto mb-10 leading-relaxed">
+            <h3 className="text-2xl font-black text-foreground mb-3">No matching discoveries found</h3>
+            <p className="text-muted-foreground font-bold text-sm max-w-sm mx-auto mb-10 leading-relaxed">
               We couldn't find any deals matching your current filters. Try relaxing your constraints or resetting to our featured trending list.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4 px-6">
               <button 
                 onClick={resetFilters}
-                className="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                className="px-8 py-4 bg-secondary hover:bg-secondary-hover text-secondary-foreground rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
               >
                 <RotateCcw size={16} />
                 Reset Filters
               </button>
               <button 
                 onClick={() => setFilters({ ...filters, minScore: '', isVerified: false })}
-                className="px-8 py-4 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-orange-500/20"
+                className="px-8 py-4 bg-primary hover:bg-primary-hover text-primary-foreground rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-sm"
               >
                 Discover Trending
               </button>

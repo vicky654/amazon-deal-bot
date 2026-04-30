@@ -1,4 +1,9 @@
+import { Inter, Manrope } from 'next/font/google';
+import { ThemeProvider } from '../components/ThemeProvider';
 import './globals.css';
+
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
+const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope' });
 
 export const metadata = {
   title: 'DealBot — Amazon Deal Generator',
@@ -7,13 +12,12 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    /*
-     * h-full on html + body lets AdminShell's h-screen take effect correctly.
-     * Without this, percentage-based heights inside the shell may not resolve
-     * to a definite pixel value in some browsers.
-     */
-    <html lang="en" className="h-full">
-      <body className="h-full antialiased">{children}</body>
+    <html lang="en" className="h-full" suppressHydrationWarning>
+      <body className={`${inter.variable} ${manrope.variable} h-full antialiased font-sans`}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

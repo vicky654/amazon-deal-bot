@@ -3,11 +3,12 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useTheme } from 'next-themes';
 import {
   Plus, Package, Activity, MessageSquare,
   Wallet, Info, BarChart2, ListChecks,
   Cpu, MousePointerClick, LayoutDashboard, Bug, SlidersHorizontal,
-  BadgePercent, TrendingDown, Sparkles, Tags, ShoppingCart, ChevronDown, ChevronRight, Award, Zap
+  BadgePercent, TrendingDown, Sparkles, Tags, ShoppingCart, ChevronDown, ChevronRight, Award, Zap, Moon, Sun, Monitor
 } from 'lucide-react';
 
 const MENU = [
@@ -76,7 +77,13 @@ const BADGE_COLORS = {
 
 export default function Sidebar({ open = false, onClose = () => {} }) {
   const pathname = usePathname();
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
   const [expanded, setExpanded] = React.useState({ 'Explore Deals': true });
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
 
   function isActive(href) {
     if (href === '/admin') return pathname === '/admin';
@@ -106,17 +113,12 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
           'transform transition-transform duration-300 ease-in-out',
           open ? 'translate-x-0' : '-translate-x-full',
           'lg:relative lg:translate-x-0 lg:h-screen lg:shrink-0',
+          'bg-surface border-r border-border',
         ].join(' ')}
-        style={{
-          background: 'rgba(2, 6, 23, 0.95)',
-          backdropFilter: 'blur(20px)',
-          borderRight: '1px solid rgba(255,255,255,0.06)',
-        }}
       >
         {/* Logo */}
         <div
-          className="shrink-0 flex items-center gap-3 px-5 py-5"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+          className="shrink-0 flex items-center gap-3 px-5 py-5 border-b border-border"
         >
           <div
             className="w-10 h-10 rounded-2xl flex items-center justify-center text-base shrink-0 shadow-lg"
@@ -128,8 +130,8 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
             🔥
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-bold text-white tracking-tight truncate">DealBot</p>
-            <p className="text-[11px] text-slate-500 truncate">Admin Panel</p>
+            <p className="text-sm font-bold text-foreground tracking-tight truncate">DealBot</p>
+            <p className="text-[11px] text-muted-foreground truncate">Admin Panel</p>
           </div>
         </div>
 
@@ -137,7 +139,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
         <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-6 scrollbar-none">
           {MENU.map((group) => (
             <div key={group.section}>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-2 px-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-2">
                 {group.section}
               </p>
               <div className="space-y-0.5">
@@ -154,16 +156,16 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
                           onClick={() => toggleExpand(item.label)}
                           className={[
                             'w-full group flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all touch-manipulation',
-                            active || isExpanded ? 'text-white' : 'text-slate-400 hover:text-white',
+                            active || isExpanded ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
                           ].join(' ')}
                         >
                           <Icon
                             className={`w-4 h-4 shrink-0 transition-colors ${
-                              active || isExpanded ? 'text-orange-400' : 'text-slate-600 group-hover:text-slate-400'
+                              active || isExpanded ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'
                             }`}
                           />
                           <span className="flex-1 text-left truncate">{item.label}</span>
-                          {isExpanded ? <ChevronDown size={14} className="text-slate-600" /> : <ChevronRight size={14} className="text-slate-600" />}
+                          {isExpanded ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
                         </button>
                       ) : (
                         <Link
@@ -171,18 +173,12 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
                           onClick={onClose}
                           className={[
                             'group flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all touch-manipulation',
-                            active ? 'text-white' : 'text-slate-400 hover:text-white',
+                            active ? 'bg-primary/10 text-primary border border-primary/20' : 'text-muted-foreground hover:text-foreground border border-transparent',
                           ].join(' ')}
-                          style={active ? {
-                            background: 'linear-gradient(135deg, rgba(249,115,22,0.18), rgba(234,88,12,0.10))',
-                            border: '1px solid rgba(249,115,22,0.25)',
-                          } : {
-                            border: '1px solid transparent',
-                          }}
                         >
                           <Icon
                             className={`w-4 h-4 shrink-0 transition-colors ${
-                              active ? 'text-orange-400' : 'text-slate-600 group-hover:text-slate-400'
+                              active ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'
                             }`}
                             strokeWidth={active ? 2.5 : 1.75}
                           />
@@ -197,7 +193,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
 
                       {/* Sub Items */}
                       {hasSub && isExpanded && (
-                        <div className="mt-1 ml-4 pl-3 border-l border-slate-800 space-y-1">
+                        <div className="mt-1 ml-4 pl-3 border-l border-border space-y-1">
                           {item.subItems.map(sub => {
                             const subActive = isActive(sub.href);
                             const SubIcon = sub.icon;
@@ -207,7 +203,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
                                 href={sub.href}
                                 onClick={onClose}
                                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] font-medium transition-colors ${
-                                  subActive ? 'text-orange-400 bg-orange-500/5' : 'text-slate-500 hover:text-slate-300'
+                                  subActive ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                                 }`}
                               >
                                 {SubIcon && <SubIcon size={12} />}
@@ -226,15 +222,23 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
         </nav>
 
         {/* Footer */}
-        <div
-          className="shrink-0 px-5 py-4"
-          style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
-        >
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-            <span className="text-xs text-slate-500">Backend connected</span>
+        <div className="shrink-0 px-5 py-4 border-t border-border flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-success animate-pulse shrink-0" />
+              <span className="text-xs text-muted-foreground font-medium">System Online</span>
+            </div>
+            
+            {mounted && (
+              <button
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                className="p-1.5 rounded-lg bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                title="Toggle Theme"
+              >
+                {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+              </button>
+            )}
           </div>
-          <p className="text-[11px] text-slate-700 mt-1">Amazon · Flipkart · Telegram</p>
         </div>
       </aside>
     </>
