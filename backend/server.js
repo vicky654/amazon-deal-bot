@@ -9,7 +9,7 @@ const path = require('path');
 // ── New multi-platform modules ────────────────────────────────────────────────
 const newCrawler = require('./src/crawler');
 const dealsRouter = require('./src/routes/deals');
-const crawlerRouter = require('./src/routes/crawler');
+const adminCrawlerRouter = require('./src/routes/adminCrawler');
 const eventsRouter = require('./src/routes/events');
 const healthRouter = require('./src/routes/health');
 const earnkaroRouter = require('./src/routes/earnkaro');
@@ -217,7 +217,7 @@ app.use('/api/auth', authRouter);         // login + token verify
 app.use('/api/dashboard', verifyToken, dashboardRouter); // protected dashboard
 app.use('/api/events', eventsRouter);
 app.use('/api/deals', dealsRouter);
-app.use('/api/crawler', crawlerRouter);
+app.use('/api/admin/crawler', verifyToken, adminCrawlerRouter);
 app.use('/api/earnkaro', earnkaroRouter);
 app.use('/api/reels', reelsRouter);
 app.use('/api/system', systemRouter);

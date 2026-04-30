@@ -95,9 +95,23 @@ let _consecutiveZeroYield = 0;    // how many back-to-back cycles found 0 fresh 
 
 function stopCrawl() {
   _stopFlag = true;
+  cronState.isStopping = true;
   clearScrapeQueue();
   emit('crawler:stopped', { type: 'info', reason: 'user-requested' });
   logger.info('[Crawler] Stop requested — queue cleared');
+  
+  // Close extra pages to release memory (keeping browser alive)
+  const { getBrowserDiagnostics, getBrowser } = require('../scraper/browser');
+  getBrowser().then(async (browser) => {
+    if (browser) {
+      const pages = await browser.pages();
+      // Keep only one blank page alive
+      for (let i = 1; i < pages.length; i++) {
+        await pages[i].close().catch(() => {});
+      }
+      logger.info('[Crawler] Closed extra browser pages to release memory on stop');
+    }
+  }).catch(() => {});
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -119,13 +133,14 @@ async function runCrawlCycle() {
   _forceSentFirstDeal = false;
   const startedAt = Date.now();
 
-  // Global tracking — readable by /api/debug/crawler
+  // Global tracking — readable by /api/debug/crawler and /api/admin/crawler
   global.crawlerRunning   = true;
   global.lastCrawlerRun   = new Date().toISOString();
   global.dealsScraped     = 0;
   global.dealsPosted      = 0;
   global.productsScanned  = 0;
   global.currentCategory  = 'Initializing...';
+  global.currentAsin      = null;
   global.lastCrawlerError = null;
 
   logger.info('[Crawler] ══ runCrawlCycle START ══');
@@ -317,7 +332,9 @@ async function runCrawlCycle() {
     metrics.gauge('crawl.last_deals_found', stats.dealsFound);
 
     global.crawlerRunning = false;
+    cronState.isStopping = false;
     global.currentCategory = 'Idle';
+    global.currentAsin = null;
     antiBot.logStats();
     logger.info(
       `═══ Crawl complete (${Math.round(durationMs / 1000)}s) ═══ ` +
@@ -329,7 +346,9 @@ async function runCrawlCycle() {
     const durationMs = Date.now() - startedAt;
 
     global.crawlerRunning   = false;
+    cronState.isStopping = false;
     global.currentCategory   = 'Failed';
+    global.currentAsin       = null;
     global.lastCrawlerError = error.message;
 
     await CrawlerRun.findByIdAndUpdate(run._id, {
@@ -361,6 +380,7 @@ async function processProduct(url, platform, stats) {
 
   logger.info(`[Scrape] ▶ START ${platform} → ${url}`);
   console.log(`[Scrape] Starting: ${asin}`);
+  global.currentAsin = asin;
 
   try {
     // Retry once on scrape failure (Puppeteer flakiness, network timeout)

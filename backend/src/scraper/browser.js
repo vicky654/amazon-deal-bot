@@ -54,6 +54,9 @@ const LAUNCH_ARGS = [
   '--no-sandbox',
   '--disable-setuid-sandbox',
   '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--no-zygote',
+  '--single-process',
   '--lang=en-IN',
   '--window-size=1366,768',
 ];
@@ -320,8 +323,9 @@ function logLaunchFailure(err, profileDir, attempt) {
 async function _doLaunch(profileDir, headlessMode) {
   const executablePath = puppeteerVanilla.executablePath();
   const dumpio         = process.env.DEBUG_BROWSER === 'true';
+  logger.info(`[Render] Chromium path detected: ${executablePath}`);
   logger.info(`[Browser] Launching — headless=${headlessMode} profile=${profileDir} dumpio=${dumpio}`);
-  logger.info(`[Browser] Executable: ${executablePath}`);
+  logger.info(`[Render] Puppeteer launched`);
 
   return puppeteer.launch({
     headless:          headlessMode,
@@ -394,6 +398,8 @@ function _onLaunchSuccess(browser) {
   _launchPromise = null;
   _pageCount     = 0;
   _browserStart  = Date.now();
+
+  logger.info('[Render] Browser connected');
 
   browser.on('disconnected', () => {
     logger.warn('[Browser] ⚠ Chromium disconnected unexpectedly');

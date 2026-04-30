@@ -44,7 +44,7 @@ const MENU = [
     items: [
       { label: 'Generate Deal',     href: '/admin/generate', icon: Plus               },
       { label: 'All Deals',         href: '/admin/deals',    icon: Package            },
-      { label: 'Crawler',           href: '/admin/crawler',  icon: Activity           },
+      { label: 'Crawler Control',   href: '/admin/crawler',  icon: Bug                },
       { label: 'Features',          href: '/admin/features', icon: SlidersHorizontal, badge: 'New' },
       { label: 'Custom Message',    href: '/admin/message',  icon: MessageSquare      },
     ],

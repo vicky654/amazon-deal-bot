@@ -5,19 +5,27 @@
 
 const state = {
   running:  false,
+  isStarting: false,
+  isStopping: false,
+  isRestarting: false,
   lastRun:  null,   // ISO string
   nextRun:  null,   // ISO string
-  logs:     [],     // newest-first array of strings (max 100)
+  logs:     [],     // newest-first array of objects (max 500)
 };
 
 /**
- * Prepend a timestamped log entry. Keeps the last 100 entries.
+ * Prepend a timestamped log entry. Keeps the last 500 entries.
  * @param {string} msg
+ * @param {string} level - 'info', 'warn', 'error'
  */
-function addLog(msg) {
-  const entry = `[${new Date().toISOString()}] ${msg}`;
+function addLog(msg, level = 'info') {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    message: msg,
+    level,
+  };
   state.logs.unshift(entry);
-  if (state.logs.length > 100) state.logs.length = 100;
+  if (state.logs.length > 500) state.logs.length = 500;
 }
 
 /**
